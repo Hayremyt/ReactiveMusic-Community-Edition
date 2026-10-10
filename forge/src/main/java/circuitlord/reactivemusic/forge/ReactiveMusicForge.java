@@ -105,6 +105,42 @@ public class ReactiveMusicForge {
                             return 1;
                         })
                 )
+
+                .then(literal("pause")
+                        .executes(context -> {
+                            ReactiveMusic.pauseMusic();
+                            MinecraftClient.getInstance().player.sendMessage(
+                                    Text.literal("[ReactiveMusic]: Music paused."), false);
+                            return 1;
+                        })
+                )
+
+                .then(literal("resume")
+                        .executes(context -> {
+                            ReactiveMusic.resumeMusic();
+                            MinecraftClient.getInstance().player.sendMessage(
+                                    Text.literal("[ReactiveMusic]: Music resumed."), false);
+                            return 1;
+                        })
+                )
+
+                .then(literal("skip")
+                        .executes(context -> {
+                            ReactiveMusic.skipSong();
+                            MinecraftClient.getInstance().player.sendMessage(
+                                    Text.literal("[ReactiveMusic]: Skipped song."), false);
+                            return 1;
+                        })
+                )
+
+                .then(literal("next")
+                        .executes(context -> {
+                            ReactiveMusic.skipSong();
+                            MinecraftClient.getInstance().player.sendMessage(
+                                    Text.literal("[ReactiveMusic]: Skipped song."), false);
+                            return 1;
+                        })
+                )
         );
     }
 }
