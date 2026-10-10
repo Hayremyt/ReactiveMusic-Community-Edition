@@ -2,6 +2,8 @@ package circuitlord.reactivemusic;
 
 
 import circuitlord.reactivemusic.config.ModConfig;
+import circuitlord.reactivemusic.entries.RMEntryBlockCondition;
+import circuitlord.reactivemusic.entries.RMEntryEntityCondition;
 import circuitlord.reactivemusic.entries.RMRuntimeEntry;
 import circuitlord.reactivemusic.mixin.BossBarHudAccessor;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
@@ -20,6 +22,7 @@ import net.minecraft.entity.vehicle.MinecartEntity;
 
 //? if >=1.20 {
 /*import net.minecraft.registry.Registries;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.tag.TagKey;
 *///?} else {
 import net.minecraft.tag.TagKey;
@@ -45,6 +48,30 @@ public final class SongPicker {
 
     public static Map<Entity, Long> recentEntityDamageSources = new HashMap<>();
 
+    public static final long COMBAT_TIMEOUT = 200L;
+    public static final int COMBAT_HIT_THRESHOLD = 3;
+    public static final float COMBAT_HEAVY_HIT_FRACTION = 0.25f;
+
+    private static final List<Long> recentCombatHits = new ArrayList<>();
+    private static long lastDamageTakenTime = -100000L;
+    private static long lastHeavyHitTime = -100000L;
+
+    public static void registerCombatHit() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.world == null) return;
+        recentCombatHits.add(mc.world.getTime());
+    }
+
+    public static void registerDamageTaken(float amount) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.world == null || mc.player == null) return;
+        lastDamageTakenTime = mc.world.getTime();
+        // single massive hit (creeper in the back, ghast fireball) counts as a fight on its own
+        if (amount / mc.player.getMaxHealth() > COMBAT_HEAVY_HIT_FRACTION) {
+            lastHeavyHitTime = mc.world.getTime();
+        }
+    }
+
 
     private static final Set<String> BLOCK_COUNTER_BLACKLIST = Set.of(); // = Set.of("ore", "debris");
     private static final Map<Block, String> BLOCK_ID_CACHE = new IdentityHashMap<>();
@@ -59,6 +86,15 @@ public final class SongPicker {
 
     public static String currentBiomeName = "";
     public static String currentDimName = "";
+
+    public static Set<String> currentStructureNames = new HashSet<>();
+
+    public static Set<String> currentBossNames = new HashSet<>();
+
+    public static final int ENTITY_SCAN_RADIUS = 64;
+    public static List<Entity> nearbyEntities = new ArrayList<>();
+    public static List<String> nearbyEntityIds = new ArrayList<>();
+    public static BlockPos entityScanCenter = BlockPos.ORIGIN;
 
 
     private static final Random rand = new Random();
@@ -82,6 +118,7 @@ public final class SongPicker {
 
         currentBiomeName = "";
         currentDimName = "";
+        currentStructureNames.clear();
 
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null)
@@ -95,7 +132,16 @@ public final class SongPicker {
         songpackEventMap.put(SongpackEventType.CREDITS, mc.currentScreen instanceof CreditsScreen);
 
         // Early out if not in-game
-        if (player == null || world == null) return;
+        if (player == null || world == null) {
+            // drop per-world state so menu music never keys off stale entities/combat
+            nearbyEntities.clear();
+            nearbyEntityIds.clear();
+            currentBossNames.clear();
+            recentCombatHits.clear();
+            lastDamageTakenTime = -100000L;
+            lastHeavyHitTime = -100000L;
+            return;
+        }
 
         // World processing
         BlockPos playerPos = new BlockPos(player.getBlockPos());
@@ -110,6 +156,8 @@ public final class SongPicker {
         var indimension = world.getRegistryKey();
 
         currentDimName = indimension.getValue().toString();
+
+        tickStructures(world, playerPos);
 
         Entity riding = VersionHelper.GetRidingEntity(player);
 
@@ -174,9 +222,9 @@ public final class SongPicker {
         songpackEventMap.put(SongpackEventType.END, indimension == World.END);
 
 
-        songpackEventMap.put(SongpackEventType.UNDERGROUND, indimension == World.OVERWORLD && underground && playerPos.getY() < 55);
-        songpackEventMap.put(SongpackEventType.DEEP_UNDERGROUND, indimension == World.OVERWORLD && underground && playerPos.getY() < 15);
-        songpackEventMap.put(SongpackEventType.HIGH_UP, indimension == World.OVERWORLD && !underground && playerPos.getY() > 128);
+        songpackEventMap.put(SongpackEventType.UNDERGROUND, indimension == World.OVERWORLD && underground && playerPos.getY() < ReactiveMusic.config.undergroundMaxY);
+        songpackEventMap.put(SongpackEventType.DEEP_UNDERGROUND, indimension == World.OVERWORLD && underground && playerPos.getY() < ReactiveMusic.config.deepUndergroundMaxY);
+        songpackEventMap.put(SongpackEventType.HIGH_UP, indimension == World.OVERWORLD && !underground && playerPos.getY() > ReactiveMusic.config.highUpMinY);
 
         songpackEventMap.put(SongpackEventType.UNDERWATER, player.isSubmergedInWater());
 
@@ -257,6 +305,54 @@ public final class SongPicker {
 
         }
 
+        {
+            // one shared scan for all ENTITY= conditions, individual radii/counts filter below
+            List<Entity> found = world.getEntitiesByClass(Entity.class,
+                    GetBoxAroundPlayer(player, ENTITY_SCAN_RADIUS, 32.f),
+                    entity -> entity != null && entity.isAlive() && entity != player);
+
+            nearbyEntities = found;
+            nearbyEntityIds = new ArrayList<>(found.size());
+            entityScanCenter = playerPos;
+
+            for (var e : found) {
+                //? if >=1.20 {
+                /*nearbyEntityIds.add(Registries.ENTITY_TYPE.getId(e.getType()).toString());
+                *///?} else {
+                nearbyEntityIds.add(Registry.ENTITY_TYPE.getId(e.getType()).toString());
+                //?}
+            }
+        }
+
+        {
+            // entity-based location/boss tags, all derived from the single scan above
+            songpackEventMap.put(SongpackEventType.NETHER_FORTRESS, hasNearbyEntity("wither_skeleton", "blaze"));
+            songpackEventMap.put(SongpackEventType.BASTION, hasNearbyEntity("piglin_brute"));
+            songpackEventMap.put(SongpackEventType.END_CITY, hasNearbyEntity("shulker"));
+            songpackEventMap.put(SongpackEventType.OCEAN_TEMPLE, hasNearbyEntity("guardian")
+                    && Boolean.TRUE.equals(songpackEventMap.get(SongpackEventType.UNDERWATER)));
+            songpackEventMap.put(SongpackEventType.FARM, hasNearbyEntity("cow") && hasNearbyEntity("chicken")
+                    && hasNearbyEntity("sheep") && hasNearbyEntity("pig"));
+            songpackEventMap.put(SongpackEventType.RAID, hasNearbyEntity("pillager", "vindicator", "evoker", "ravager", "illusioner"));
+
+            songpackEventMap.put(SongpackEventType.WARDEN, hasNearbyEntity("warden"));
+            songpackEventMap.put(SongpackEventType.WITHER, hasNearbyEntityIdEnding(":wither"));
+            songpackEventMap.put(SongpackEventType.DRAGON, hasNearbyEntity("ender_dragon"));
+            songpackEventMap.put(SongpackEventType.BATTLE, recentEntityDamageSources.size() >= 5);
+        }
+
+        {
+            // real fight: enough back-and-forth hits recently, plus actual danger
+            // (recently hurt or hostile mobs nearby, so poking one zombie doesn't count)
+            recentCombatHits.removeIf(hitTime -> world.getTime() - hitTime > COMBAT_TIMEOUT);
+            boolean combatHits = recentCombatHits.size() >= COMBAT_HIT_THRESHOLD
+                    || world.getTime() - lastHeavyHitTime <= COMBAT_TIMEOUT;
+            boolean combatDanger = world.getTime() - lastDamageTakenTime <= COMBAT_TIMEOUT
+                    || Boolean.TRUE.equals(songpackEventMap.get(SongpackEventType.NEARBY_MOBS));
+            boolean peacefulMode = player.getAbilities().creativeMode || player.isSpectator();
+            songpackEventMap.put(SongpackEventType.COMBAT, !peacefulMode && combatHits && combatDanger);
+        }
+
 
         //songpackEventMap.put(SongpackEventType.HOSTILE_MOBS, aggroMobsCount >= 4);
 
@@ -265,6 +361,7 @@ public final class SongPicker {
 
         // try to get boss bars
         boolean bossBarActive = false;
+        currentBossNames.clear();
 
         if (mc.inGameHud != null && mc.inGameHud.getBossBarHud() != null) {
             try {
@@ -273,6 +370,10 @@ public final class SongPicker {
 
                 if (!bossBars.isEmpty()) {
                     bossBarActive = true;
+                    for (var bossBar : bossBars.values()) {
+                        // strip whitespace, queries are whitespace-stripped too
+                        currentBossNames.add(bossBar.getName().getString().toLowerCase(Locale.ROOT).replaceAll("\\s", ""));
+                    }
                 }
             } catch (Exception e) {
             }
@@ -285,6 +386,54 @@ public final class SongPicker {
         songpackEventMap.put(SongpackEventType.GENERIC, true);
     }
 
+
+    public static void tickStructures(World world, BlockPos playerPos) {
+        currentStructureNames.clear();
+
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null) return;
+
+        // Structure data is never sent to the client, it only exists on the server side.
+        // The integrated singleplayer server is reachable from here, dedicated servers are not,
+        // so STRUCT events only work in singleplayer (they stay false in multiplayer).
+        var server = mc.getServer();
+        if (server == null) return;
+
+        try {
+            var serverWorld = server.getWorld(world.getRegistryKey());
+            if (serverWorld == null) return;
+
+            //? if >=1.21.11 {
+            /*var structureRegistry = serverWorld.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
+            *///?} else if >=1.20 {
+            /*var structureRegistry = serverWorld.getRegistryManager().get(RegistryKeys.STRUCTURE);
+            *///?} else {
+            var structureRegistry = serverWorld.getRegistryManager().get(Registry.STRUCTURE_KEY);
+            //?}
+
+            // Scan 3x3 chunks around the player, structure bounding boxes can extend beyond their origin chunk
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    var chunk = serverWorld.getWorldChunk(new BlockPos(playerPos.getX() + dx * 16, playerPos.getY(), playerPos.getZ() + dz * 16));
+                    if (chunk == null) continue;
+
+                    // copy to avoid concurrent modification, the server thread can rebuild chunks at any time
+                    for (var startEntry : new ArrayList<>(chunk.getStructureStarts().entrySet())) {
+                        var start = startEntry.getValue();
+                        if (start == null || !start.hasChildren()) continue;
+                        if (!start.getBoundingBox().contains(playerPos)) continue;
+
+                        var id = structureRegistry.getId(startEntry.getKey());
+                        if (id != null) {
+                            currentStructureNames.add(id.toString().toLowerCase(Locale.ROOT));
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // never let structure lookup break the music tick
+        }
+    }
 
 
     public static void tickBlockCounterMap() {
@@ -435,8 +584,18 @@ public final class SongPicker {
     }
 
 
-    static String pickRandomSong(List<String> songs) {
+    static void markSongRecent(String song) {
+        if (song == null) return;
+        // only track the past X songs
+        if (recentlyPickedSongs.size() >= 8) {
+            recentlyPickedSongs.remove(0);
+        }
+        if (!recentlyPickedSongs.contains(song)) {
+            recentlyPickedSongs.add(song);
+        }
+    }
 
+    static String pickRandomSong(List<String> songs) {
         if (songs.isEmpty()) {
             return null;
         }
@@ -482,55 +641,35 @@ public final class SongPicker {
 
         for (var condition : entry.conditions) {
 
-            // each condition functions as an OR, if at least one of them is true then the condition is true
+            // each condition functions as an AND, every condition in the entry must hold
 
+            boolean hasPositives = !condition.songpackEvents.isEmpty() || !condition.biomeTypes.isEmpty()
+                    || !condition.dimTypes.isEmpty() || !condition.biomeTags.isEmpty()
+                    || !condition.blocks.isEmpty() || !condition.structureTypes.isEmpty()
+                    || !condition.entityTypes.isEmpty() || !condition.bossTypes.isEmpty();
 
-            boolean songpackEventsValid = false;
+            // positives function as an OR, at least one of them must hold (or none specified)
+            boolean positivesHold = !hasPositives
+                    || anyEventMatches(condition.songpackEvents)
+                    || anyBiomeMatches(condition.biomeTypes)
+                    || anyBiomeTagMatches(condition.biomeTags)
+                    || anyDimMatches(condition.dimTypes)
+                    || anyBlockMatches(condition.blocks)
+                    || anyStructureMatches(condition.structureTypes)
+                    || anyEntityMatches(condition.entityTypes)
+                    || anyBossMatches(condition.bossTypes);
 
-            for (SongpackEventType songpackEvent : condition.songpackEvents) {
-                if (songpackEventMap.containsKey(songpackEvent) && songpackEventMap.get(songpackEvent)) {
-                    songpackEventsValid = true;
-                    break;
-                }
-            }
+            if (!positivesHold) return false;
 
-            boolean blocksValid = false;
-            for (var blockCond : condition.blocks) {
-                for (var kvp : cachedBlockChecker.object2IntEntrySet()) {
-                    if (kvp.getKey().contains(blockCond.block) && kvp.getIntValue() >= blockCond.requiredCount) {
-                        blocksValid = true;
-                        break;
-                    }
-                }
-            }
-
-            boolean biomeTypesValid = false;
-            for (var biome : condition.biomeTypes) {
-                if (currentBiomeName.contains(biome)) {
-                    biomeTypesValid = true;
-                    break;
-                }
-            }
-
-            boolean biomeTagsValid = false;
-            for (var biomeTag : condition.biomeTags) {
-                if (biomeTagEventMap.containsKey(biomeTag) && biomeTagEventMap.get(biomeTag)) {
-                    biomeTagsValid = true;
-                    break;
-                }
-            }
-
-            boolean dimsValid = false;
-            for (var dim : condition.dimTypes) {
-                if (currentDimName.contains(dim)) {
-                    dimsValid = true;
-                    break;
-                }
-            }
-
-
-            if (!songpackEventsValid && !biomeTypesValid && !biomeTagsValid && !dimsValid && !blocksValid) {
-                // none of the OR conditions were valid on this condition, return false
+            // negated ("!EVENT") entries, none of them may match
+            if (anyEventMatches(condition.negSongpackEvents)
+                    || anyBiomeMatches(condition.negBiomeTypes)
+                    || anyBiomeTagMatches(condition.negBiomeTags)
+                    || anyDimMatches(condition.negDimTypes)
+                    || anyBlockMatches(condition.negBlocks)
+                    || anyStructureMatches(condition.negStructureTypes)
+                    || anyEntityMatches(condition.negEntityTypes)
+                    || anyBossMatches(condition.negBossTypes)) {
                 return false;
             }
 
@@ -538,7 +677,114 @@ public final class SongPicker {
 
         // we passed without failing so it must be true
         return true;
-        
+
+    }
+
+
+    static boolean anyEventMatches(List<SongpackEventType> events) {
+        for (SongpackEventType songpackEvent : events) {
+            if (songpackEventMap.containsKey(songpackEvent) && songpackEventMap.get(songpackEvent)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean anyBiomeMatches(List<String> biomes) {
+        for (var biome : biomes) {
+            if (currentBiomeName.contains(biome)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean anyBiomeTagMatches(List<TagKey<Biome>> biomeTags) {
+        for (var biomeTag : biomeTags) {
+            if (biomeTagEventMap.containsKey(biomeTag) && biomeTagEventMap.get(biomeTag)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean anyDimMatches(List<String> dims) {
+        for (var dim : dims) {
+            if (currentDimName.contains(dim)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean anyBlockMatches(List<RMEntryBlockCondition> blocks) {
+        for (var blockCond : blocks) {
+            for (var kvp : cachedBlockChecker.object2IntEntrySet()) {
+                if (kvp.getKey().contains(blockCond.block) && kvp.getIntValue() >= blockCond.requiredCount) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static boolean anyStructureMatches(List<String> structs) {
+        for (var struct : structs) {
+            for (var current : currentStructureNames) {
+                if (current.contains(struct)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static boolean anyEntityMatches(List<RMEntryEntityCondition> conds) {        for (var cond : conds) {
+            int count = 0;
+            double r2 = (double) cond.radius * cond.radius;
+            for (int i = 0; i < nearbyEntities.size(); i++) {
+                if (!nearbyEntityIds.get(i).contains(cond.entity)) continue;
+                var e = nearbyEntities.get(i);
+                double dx = e.getX() - entityScanCenter.getX();
+                double dy = e.getY() - entityScanCenter.getY();
+                double dz = e.getZ() - entityScanCenter.getZ();
+                if (dx * dx + dy * dy + dz * dz <= r2 && ++count >= cond.minCount) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static boolean anyBossMatches(List<String> bosses) {
+        for (var boss : bosses) {
+            for (var current : currentBossNames) {
+                if (current.contains(boss)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static boolean hasNearbyEntity(String... substrings) {
+        for (var id : nearbyEntityIds) {
+            for (var sub : substrings) {
+                if (id.contains(sub)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static boolean hasNearbyEntityIdEnding(String suffix) {
+        for (var id : nearbyEntityIds) {
+            if (id.endsWith(suffix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 
