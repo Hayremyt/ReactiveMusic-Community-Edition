@@ -63,7 +63,7 @@ Here's an example songpack entry:
 
 - `(SongpackEventType) events` The specific events that need to be valid for this entry to play. (see details below)
 - `(Boolean) allowFallback` (default false) If we've played all songs from this event, should  we "fallback" to other events that are also valid? (good for one-off events you don't want to play over and over)
-- `(String[]) songs` The list of song files to pick from when this event plays. These are picked from the `music` sub-folder.
+- `(String[]) songs` The list of song files to pick from when this event plays. These are picked from the `music` sub-folder. Names can be bare (`"Freedom"` prefers `.mp3`, old packs keep working as-is) or carry an explicit extension (`"Intro.ogg"`, `"Outro.wav"`). Supported formats: `.mp3`, `.ogg` (Vorbis), `.wav`. Anything else (renamed `.m4a`, etc.) is rejected at load with an error instead of playing silence.
 
 <br><br>
 
