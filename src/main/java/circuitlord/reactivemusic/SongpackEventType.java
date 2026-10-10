@@ -52,6 +52,20 @@ public enum SongpackEventType {
 
     NEARBY_MOBS,
 
+    // entity-based location/boss tags (from nearby mobs, see issue #26)
+    NETHER_FORTRESS,
+    BASTION,
+    END_CITY,
+    OCEAN_TEMPLE,
+    FARM,
+    RAID,
+
+    WARDEN,
+    WITHER,
+    DRAGON,
+    BATTLE,
+    COMBAT,
+
 
 
 
