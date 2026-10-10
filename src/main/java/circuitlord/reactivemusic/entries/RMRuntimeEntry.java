@@ -32,6 +32,8 @@ public class RMRuntimeEntry {
 
     public float forceChance = 1.0f;
 
+    public boolean ignoreMusicDelay = false;
+
     public List<String> songs = new ArrayList<>();
 
     public String eventString = "";
@@ -54,6 +56,8 @@ public class RMRuntimeEntry {
         Entry.forceStartMusicOnValid = songpackEntry.forceStartMusicOnValid;
 
         Entry.forceChance = songpackEntry.forceChance;
+
+        Entry.ignoreMusicDelay = songpackEntry.ignoreMusicDelay;
 
         if (songpackEntry.songs != null) {
             Entry.songs = Arrays.stream(songpackEntry.songs).toList();
@@ -83,6 +87,17 @@ public class RMRuntimeEntry {
             // Parse each event section (may only be one)
             for (String eventSection : eventSections) {
 
+                // negated section ("!NIGHT", "!BIOME=ocean"), none of these may match
+                boolean negated = false;
+                if (eventSection.startsWith("!")) {
+                    negated = true;
+                    eventSection = eventSection.substring(1);
+                    if (eventSection.isEmpty()) {
+                        Entry.errorString += "Invalid syntax: lone '!' is not an event!\n\n";
+                        continue;
+                    }
+                }
+
                 if (eventSection.startsWith("block=")) {
 
                     String blockData = eventSection.substring(6);
@@ -95,7 +110,8 @@ public class RMRuntimeEntry {
                         blockCond.block = parts[0];
                         blockCond.requiredCount = Integer.parseInt(parts[1]);
 
-                        condition.blocks.add(blockCond);
+                        if (negated) condition.negBlocks.add(blockCond);
+                        else condition.blocks.add(blockCond);
 
                         eventHasData = true;
                     }
@@ -111,7 +127,8 @@ public class RMRuntimeEntry {
                     if (biomeName.isEmpty())
                         continue;
 
-                    condition.biomeTypes.add(biomeName);
+                    if (negated) condition.negBiomeTypes.add(biomeName);
+                    else condition.biomeTypes.add(biomeName);
                     eventHasData = true;
                 }
 
@@ -126,7 +143,8 @@ public class RMRuntimeEntry {
                     TagKey<Biome> biomeTag = BiomeTagHelper.INSTANCE.createBiomeTagKey(path);
 
                     if (biomeTag != null) {
-                        condition.biomeTags.add(biomeTag);
+                        if (negated) condition.negBiomeTags.add(biomeTag);
+                        else condition.biomeTags.add(biomeTag);
                         SongPicker.registerBiomeTag(biomeTag);
                         eventHasData = true;
                     } else {
@@ -141,7 +159,67 @@ public class RMRuntimeEntry {
                     if (dimName.isEmpty())
                         continue;
 
-                    condition.dimTypes.add(dimName);
+                    if (negated) condition.negDimTypes.add(dimName);
+                    else condition.dimTypes.add(dimName);
+                    eventHasData = true;
+                }
+
+                // structures
+                else if (eventSection.startsWith("structure=")) {
+                    String structName = eventSection.substring(10);
+                    if (structName.isEmpty())
+                        continue;
+
+                    if (negated) condition.negStructureTypes.add(structName);
+                    else condition.structureTypes.add(structName);
+                    eventHasData = true;
+                }
+
+                // structures (short alias)
+                else if (eventSection.startsWith("struct=")) {
+                    String structName = eventSection.substring(7);
+                    if (structName.isEmpty())
+                        continue;
+
+                    if (negated) condition.negStructureTypes.add(structName);
+                    else condition.structureTypes.add(structName);
+                    eventHasData = true;
+                }
+
+                // entities, ENTITY=zombie or ENTITY=zombie,32 or ENTITY=zombie,32,3 (type, radius, min count)
+                else if (eventSection.startsWith("entity=")) {                    String entityData = eventSection.substring(7);
+                    String[] parts = entityData.split(",");
+
+                    if (parts.length >= 1 && !parts[0].isEmpty()) {
+                        RMEntryEntityCondition entityCond = new RMEntryEntityCondition();
+                        entityCond.entity = parts[0];
+
+                        if (parts.length >= 2 && parts[1].matches("\\d+")) {
+                            entityCond.radius = Math.min(Integer.parseInt(parts[1]), SongPicker.ENTITY_SCAN_RADIUS);
+                        }
+
+                        if (parts.length >= 3 && parts[2].matches("\\d+")) {
+                            entityCond.minCount = Math.max(1, Integer.parseInt(parts[2]));
+                        }
+
+                        if (negated) condition.negEntityTypes.add(entityCond);
+                        else condition.entityTypes.add(entityCond);
+
+                        eventHasData = true;
+                    }
+                    else {
+                        Entry.errorString += "Invalid syntax: " + eventSection + "!\n\n";
+                    }
+                }
+
+                // specific bosses by boss bar title substring, BOSS=wither (bare BOSS still means any boss bar)
+                else if (eventSection.startsWith("boss=")) {
+                    String bossName = eventSection.substring(5);
+                    if (bossName.isEmpty())
+                        continue;
+
+                    if (negated) condition.negBossTypes.add(bossName);
+                    else condition.bossTypes.add(bossName);
                     eventHasData = true;
                 }
 
@@ -154,7 +232,8 @@ public class RMRuntimeEntry {
 
                         // it's a songpack event
                         if (eventType != SongpackEventType.NONE) {
-                            condition.songpackEvents.add(eventType);
+                            if (negated) condition.negSongpackEvents.add(eventType);
+                            else condition.songpackEvents.add(eventType);
                             eventHasData = true;
                             continue;
                         }
