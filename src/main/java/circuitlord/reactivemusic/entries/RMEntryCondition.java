@@ -25,4 +25,26 @@ public class RMEntryCondition {
 
     public List<RMEntryBlockCondition> blocks = new ArrayList<>();
 
+    public List<String> structureTypes = new ArrayList<>();
+
+    public List<RMEntryEntityCondition> entityTypes = new ArrayList<>();
+
+    public List<String> bossTypes = new ArrayList<>();
+
+    // negated ("!EVENT") lists, none of these may match for the condition to be valid
+    public List<SongpackEventType> negSongpackEvents = new ArrayList<>();
+    public List<String> negBiomeTypes = new ArrayList<>();
+
+    public List<String> negDimTypes = new ArrayList<>();
+
+    public List<TagKey<Biome>> negBiomeTags = new ArrayList<>();
+
+    public List<RMEntryBlockCondition> negBlocks = new ArrayList<>();
+
+    public List<String> negStructureTypes = new ArrayList<>();
+
+    public List<RMEntryEntityCondition> negEntityTypes = new ArrayList<>();
+
+    public List<String> negBossTypes = new ArrayList<>();
+
 }
