@@ -21,6 +21,10 @@ this will make songs switch whenever their events become valid and removes silen
 
 You can also run `/reactivemusic toggleLogging` to display what the mod is doing in real-time.
 
+Music controls: `/reactivemusic pause`, `/reactivemusic resume`, `/reactivemusic skip` (or `next`). A now-playing toast shows on every song switch, toggle it with `showNowPlayingToast` in `config/ReactiveMusic.json5`.
+
+Music files must be real MP3s — renamed `.m4a`/`.ogg`/`.wav` files are rejected at load with an error in the songpack details instead of playing silence. Missing files are reported the same way, including the folder that was searched.
+
 <br>
 
 ## Songpack Configuration
@@ -72,6 +76,8 @@ There are also a couple of other advanced params you can use:
 
 `(float) forceChance` (default 1.0f) If forceStop/Start is enabled, what is the chance it happens? Good for events where you only want the music to switch sometimes.
 
+`(Boolean) ignoreMusicDelay` (default false) Skip the `musicDelayLength` silence before starting this entry. Good for BOSS/CREDITS entries when you use a LONG delay everywhere else.
+
 <br><br>
 
 
@@ -100,56 +106,130 @@ You can also combine multiple events for more specific songs, or do an "OR" cond
       - "Freedom"
 ```
 
+You can also negate any event with `!`:
+
+```
+  - events: [ "DAY", "!RAIN" ]
+    songs:
+      - "ForTheKing"
+
+  - events: [ "!BIOME=ocean", "!STRUCT=village" ]
+    songs:
+      - "Freedom"
+```
+
+## Entry priority (order matters!)
+
+Every tick the mod collects all valid entries **in file order** and plays the first one. A broad entry placed high shadows everything below it while it stays valid.
+
+Order from specific to generic. Recommended chain for fights:
+
+```
+  - events: [ "BOSS=wither" ]   # exact boss theme
+  - events: [ "BOSS" ]          # any boss bar
+  - events: [ "WARDEN" ]        # boss mob without a bar
+  - events: [ "BATTLE" ]        # outnumbered swarm
+  - events: [ "COMBAT" ]        # back-and-forth fight
+  - events: [ "NEARBY_MOBS" ]   # tense presence
+  - events: [ "DAY" ]           # fallback
+```
+
+Two more tricks: a higher entry with `forceStopMusicOnChanged` interrupts immediately when it becomes valid (boss spawns mid-fight); falling back down follows the normal silence delay unless the lower entry has `ignoreMusicDelay`. And if two entries share the same song file, the handoff is seamless (no restart).
+
 <br><br>
 
 ## Events (SongpackEventTypes)
 
-This lists all the available songpack events you have available.
+All available event types. Remember: within one entry, different events mean AND; `||` inside one string means OR; `!` negates; the first valid entry in file order wins.
 
 ### Special
-- `MAIN_MENU`
-- `CREDITS`
-- `HOME` (within 45 blocks of bed)
+- `MAIN_MENU` (no world loaded — title screen)
+- `CREDITS` (credits screen open)
+- `HOME` (within 45 blocks of where you last slept; the spot saves automatically on sleep)
 
-### Time
-- `DAY`
-- `NIGHT`
-- `SUNRISE`
-- `SUNSET`
+### Time (day is 0–24000 ticks; overlaps happen — SUNSET/SUNRISE are also DAY, order decides)
+- `DAY` (everything except 13000–23000)
+- `NIGHT` (13000–23000)
+- `SUNSET` (12000–13000, always together with DAY)
+- `SUNRISE` (23000–24000, always together with DAY)
 
-### Weather
-- `RAIN`
-- `SNOW`
-- `STORM`
+### Weather (rain vs snow depends on the biome you're standing in)
+- `RAIN` (it's raining and your biome rains)
+- `SNOW` (it's raining and your biome snows)
+- `STORM` (thunderstorm, anywhere)
 
-### World Height
-- `UNDERWATER`
-- `UNDERGROUND`
-- `DEEP_UNDERGROUND`
-- `HIGH_UP`
+### World Height (thresholds configurable, see Height event thresholds below)
+- `UNDERWATER` (head under water)
+- `UNDERGROUND` (overworld, no sky above you, below `undergroundMaxY`)
+- `DEEP_UNDERGROUND` (same, below `deepUndergroundMaxY` — always fires together with UNDERGROUND, so put it higher in the file)
+- `HIGH_UP` (overworld, sky visible, above `highUpMinY`)
 
 ### Entities
-- `NEARBY_MOBS` (nearby >= 1 monster, may not work that well and may be replaced with combat events soon)
-- `MINECART`
-- `BOAT`
-- `HORSE`
-- `PIG`
+- `NEARBY_MOBS` (1 or more hostiles within 12 blocks sideways / 6 up-down — presence detector, use COMBAT for real fights)
+- `MINECART` (riding a minecart)
+- `BOAT` (riding a boat, chest boats count)
+- `HORSE` (riding a horse)
+- `PIG` (riding a saddled pig)
 
 ### Actions
-- `FISHING`
-- `DYING`
+- `FISHING` (fishing rod cast out)
+- `DYING` (health below 35% of max)
 
 ### Location
-- `VILLAGE` (nearby villagers)
+- `VILLAGE` (1 or more villagers within 30 blocks sideways / 15 up-down)
+
+### Structure tags (from nearby mobs, all within the shared 64-block entity scan)
+- `NETHER_FORTRESS` (wither skeletons or blazes nearby)
+- `BASTION` (piglin brutes nearby — brutes only live in bastions, unlike regular piglins)
+- `END_CITY` (shulkers nearby)
+- `OCEAN_TEMPLE` (guardians nearby AND you are underwater)
+- `FARM` (cows, chickens, sheep and pigs all nearby at once — keep it low priority, everything overwrites it. Note: piglins also contain "pig", so bastions can trigger it too)
+- `RAID` (illagers nearby: pillagers, vindicators, evokers, ravagers, illusioners)
+
+```
+  - events: [ "NETHER_FORTRESS" ]
+    forceStopMusicOnChanged: true
+    songs:
+      - "Mufaya-DarkAscension"
+```
 
 ### Combat
 - `BOSS` (whenever a boss bar is on-screen)
+- `BOSS=name` (boss bar title contains `name`, e.g. `BOSS=wither`, `BOSS=dragon` — case-insensitive, spaces don't matter)
+- `WARDEN`, `WITHER`, `DRAGON` (that boss mob nearby, no boss bar needed — WITHER matches the boss exactly, not skeletons)
+- `BATTLE` (5 or more distinct recent attackers within the last 10 seconds — a rough "outnumbered" detector)
+- `COMBAT` (an actual back-and-forth fight: 3+ hits traded in the last 10 seconds plus danger — recently hurt or hostile mobs nearby, so poking one zombie doesn't count. A single hit over 25% of your max HP counts on its own. Disabled in creative/spectator)
+
+```
+  - events: [ "COMBAT" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    songs:
+      - "LastStand"
+      - "Ruthless"
+```
+
+```
+  # wither gets its own theme, other bosses fall through to generic BOSS
+  - events: [ "BOSS=wither" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    songs:
+      - "Mufaya-DarkAscension"
+
+  - events: [ "BOSS" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    songs:
+      - "LastStand"
+      - "Ruthless"
+```
 
 <br><br>
 
 ## Biome Events
 
-You can search for any biome by using `BIOME=biomename`. This can be the full biome name or just a part of it if you want to soft-search.
+You can search for any biome by using `BIOME=biomename`. This can be the full biome id or just a part of it (case-insensitive substring, so modded biomes work the same way).
 
 ```
   # any biome with cherry in the name
@@ -188,9 +268,55 @@ Dimensions can be specified by doing `DIM=dimname`. Similar to biome events, thi
 <br><br>
 
 
+## Structure Events
+
+Structures can be specified by doing `STRUCT=structname` (`STRUCTURE=` works too as an alias). Similar to biome/dimension events, this can be the fully typed id or just a subset of it (case-insensitive). You match by being inside the structure's bounding box (checked over the 3×3 chunks around you). Modded structures work the same way, use their namespace id.
+
+```
+  # any village variant
+  - events: [ "STRUCT=village" ]
+    songs:
+      - "KeeperOfTheForest"
+
+  # exact structure + OR condition
+  - events: [ "STRUCT=minecraft:ancient_city || STRUCT=trial_chambers" ]
+    forceStopMusicOnChanged: true
+    songs:
+      - "Storm"
+```
+
+Find structure ids with the vanilla command `/locate structure minecraft:` (autocomplete lists everything, including modded ones).
+
+NOTE: structure data is never sent to the client by vanilla, the mod reads it from the integrated singleplayer server. `STRUCT` events only work in singleplayer (or LAN with cheats/host), on dedicated servers they never match.
+
+<br><br>
+
+
+## Entity Events
+
+Entities can be specified by doing `ENTITY=typename`, with optional radius and minimum count: `ENTITY=zombie`, `ENTITY=zombie,32`, `ENTITY=zombie,32,3`. The type is matched as a substring of the entity id, so modded mobs work too. Radius defaults to 32 (max 64), count defaults to 1.
+
+```
+  # raid music when 3+ pillagers within 48 blocks
+  - events: [ "ENTITY=pillager,48,3" ]
+    forceStopMusicOnChanged: true
+    songs:
+      - "LastStand"
+
+  # ender dragon from far away (uses 3D distance)
+  - events: [ "ENTITY=ender_dragon,64" ]
+    songs:
+      - "Ruthless"
+```
+
+Find entity ids with the vanilla command `/summon ` (autocomplete lists everything, including modded ones).
+
+<br><br>
+
+
 ## Block Events
 
-In version 1.2.0 and above, you can detect nearby blocks in a square 25 block radius.
+In version 1.2.0 and above, you can detect nearby blocks in a 51×51×51 cube around you (25 blocks each way, rescanned continuously).
 
 Use `/reactivemusic logBlockCounter` to print the nearby block counts to get an idea of what numbers to use.
 
@@ -205,6 +331,20 @@ Fortress detection example:
 
 
 # Mod Configuration
+
+## Height event thresholds
+
+In `config/ReactiveMusic.json5` you can change the Y levels for height-based events (defaults match vanilla overworld generation). Useful on modded terrain (Terralith, Tectonic, Lithosphere) or servers with changed world height where the defaults never trigger.
+
+```
+	undergroundMaxY: 55,
+	deepUndergroundMaxY: 15,
+	highUpMinY: 128,
+```
+
+- `undergroundMaxY` — `UNDERGROUND` triggers below this Y (without sky access)
+- `deepUndergroundMaxY` — `DEEP_UNDERGROUND` triggers below this Y (without sky access)
+- `highUpMinY` — `HIGH_UP` triggers above this Y
 
 ## Making Sounds Mute Music
 
@@ -228,6 +368,33 @@ Example:
 		"partial-event-name"
 	],
 ```
+
+## Dynamic FPS compatibility
+
+If the Dynamic FPS mod is installed, its volume setting (e.g. quieter when unfocused) applies to Reactive Music too — the mod mirrors Dynamic FPS's multiplier onto its own audio line, since Dynamic FPS can only see vanilla sounds.
+
+## Custom biome tags
+In `config/ReactiveMusic.json5` you can list extra biome tags usable as `BIOMETAG=` in any songpack. Good for modded tags (Nature's Spirit `is_alpine`) or vanilla tags the mod doesn't use by default (`has_structure/village`).
+
+```
+	customBiomeTags: [
+		"is_alpine",
+		"has_structure/village"
+	],
+```
+
+## Multiple songpacks at once
+
+In `config/ReactiveMusic.json5` you can list several songpacks to play at the same time. Entries are merged in listed order (earlier packs win ties), each entry keeps its own pack's music files and switch/delay defaults. Empty list (default) keeps the classic single-pack behavior from the in-game menu — clicking Load there exits multi-pack mode.
+
+```
+	activeSongpacks: [
+		"Adventure Redefined",
+		"My Awesome Songpack"
+	],
+```
+
+Requires a game restart to apply.
 
 <br><br>
 
