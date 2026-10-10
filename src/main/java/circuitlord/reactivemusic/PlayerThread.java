@@ -1,6 +1,7 @@
 package circuitlord.reactivemusic;
 
 
+import circuitlord.reactivemusic.compat.CompatUtils;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.GameOptions;
 import net.minecraft.sound.SoundCategory;
@@ -45,6 +46,8 @@ public class PlayerThread extends Thread {
 	public volatile static String currentSong = null;
 	public volatile static String currentSongChoices = null;
 
+	public volatile SongpackZip currentPack = null;
+
 	public volatile MusicPackResource currentSongResource = null;
 	
 	AdvancedPlayer player;
@@ -53,6 +56,8 @@ public class PlayerThread extends Thread {
 
 	private volatile boolean kill = false;
 	private volatile boolean playing = false;
+
+	private volatile boolean loadFailedLogged = false;
 
 
 	boolean notQueuedOrPlaying() {
@@ -71,16 +76,33 @@ public class PlayerThread extends Thread {
 
 	@Override
 	public void run() {
-		try {
-			while(!kill) {
-
+		while(!kill) {
+			try {
 				if(queued && currentSong != null) {
 
-					currentSongResource = RMSongpackLoader.getInputStream(ReactiveMusic.currentSongpack.path, "music/" + currentSong + ".mp3", ReactiveMusic.currentSongpack.embedded);
-					if(currentSongResource == null || currentSongResource.inputStream == null)
+					if (currentPack == null) {
+						Thread.sleep(500);
 						continue;
+					}
 
-					player = new AdvancedPlayer(currentSongResource.inputStream);
+					currentSongResource = RMSongpackLoader.getInputStream(currentPack.path, "music/" + currentSong + ".mp3", currentPack.embedded);
+					if(currentSongResource == null || currentSongResource.inputStream == null) {
+						if (!loadFailedLogged) {
+							ReactiveMusic.LOGGER.error("Failed to load song stream: " + currentSong);
+							loadFailedLogged = true;
+						}
+						Thread.sleep(500);
+						continue;
+					}
+					loadFailedLogged = false;
+
+					try {
+						player = new AdvancedPlayer(currentSongResource.inputStream);
+					} catch(Exception e) {
+						ReactiveMusic.LOGGER.error("Failed to create player for " + currentSong, e);
+						Thread.sleep(500);
+						continue;
+					}
 					queued = false;
 
 				}
@@ -94,13 +116,32 @@ public class PlayerThread extends Thread {
 
 					ReactiveMusic.LOGGER.info("Playing " + currentSong);
 					playing = true;
-					player.play();
+					try {
+						player.play();
+					} catch(Exception e) {
+						ReactiveMusic.LOGGER.error("Error during playback of " + currentSong, e);
+					} finally {
+						playing = false;
+					}
 
 				}
+				else if(!queued) {
+					// idle with nothing to do, avoid busy-spinning
+					Thread.sleep(100);
+				}
 
+			} catch(InterruptedException e) {
+				Thread.currentThread().interrupt();
+			} catch(Exception e) {
+				// never let the player thread die (broken audio device, corrupt file, ...),
+				// otherwise music stays silent until game restart
+				ReactiveMusic.LOGGER.error("ReactiveMusic player thread error", e);
+				try {
+					Thread.sleep(1000);
+				} catch(InterruptedException ie) {
+					Thread.currentThread().interrupt();
+				}
 			}
-		} catch(Exception e) {
-			e.printStackTrace();
 		}
 	}
 
@@ -114,6 +155,7 @@ public class PlayerThread extends Thread {
 
 		queued = false;
 		currentSong = null;
+		currentPack = null;
 
 		if (currentSongResource != null && currentSongResource.fileSystem != null) {
             try {
@@ -126,11 +168,17 @@ public class PlayerThread extends Thread {
 		currentSongResource = null;
 	}
 
-	public void play(String song) {
+	public void play(String song, SongpackZip pack) {
 		resetPlayer();
 
+		loadFailedLogged = false;
 		currentSong = song;
+		currentPack = pack;
 		queued = true;
+	}
+
+	public void play(String song) {
+		play(song, ReactiveMusic.currentSongpack);
 	}
 	
 /*	public float getGain() {
@@ -196,7 +244,7 @@ public class PlayerThread extends Thread {
 		//ReactiveMusic.LOGGER.info("minecraft fake gain: " + minecraftGain);
 
 
-		float newRealGain = MIN_GAIN + (MAX_GAIN - MIN_GAIN) * minecraftGain * gainPercentage * quietPercentage * musicDiscDuckPercentage;
+		float newRealGain = MIN_GAIN + (MAX_GAIN - MIN_GAIN) * minecraftGain * gainPercentage * quietPercentage * musicDiscDuckPercentage * CompatUtils.getDynamicFpsMusicMultiplier();
 
 		// Force to basically off if the user sets their volume off
 		if (minecraftGain <= 0) {
