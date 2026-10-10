@@ -51,6 +51,8 @@ public class PlayerThread extends Thread {
 	public volatile MusicPackResource currentSongResource = null;
 	
 	AdvancedPlayer player;
+	OggPlayer oggPlayer;
+	WavPlayer wavPlayer;
 
 	private volatile boolean queued = false;
 
@@ -65,7 +67,11 @@ public class PlayerThread extends Thread {
 	}
 
 	boolean isPlaying() {
-		return playing && !player.getComplete();
+		if (!playing) return false;
+		if (player != null) return !player.getComplete();
+		if (oggPlayer != null) return !oggPlayer.isDone();
+		if (wavPlayer != null) return !wavPlayer.isDone();
+		return false;
 	}
 	
 	public PlayerThread() {
@@ -85,7 +91,17 @@ public class PlayerThread extends Thread {
 						continue;
 					}
 
-					currentSongResource = RMSongpackLoader.getInputStream(currentPack.path, "music/" + currentSong + ".mp3", currentPack.embedded);
+					String fileName = RMSongpackLoader.resolveSongFile(currentPack.path, currentSong, currentPack.embedded);
+					if (fileName == null) {
+						if (!loadFailedLogged) {
+							ReactiveMusic.LOGGER.error("Failed to locate song file: " + currentSong);
+							loadFailedLogged = true;
+						}
+						Thread.sleep(500);
+						continue;
+					}
+
+					currentSongResource = RMSongpackLoader.getInputStream(currentPack.path, fileName, currentPack.embedded);
 					if(currentSongResource == null || currentSongResource.inputStream == null) {
 						if (!loadFailedLogged) {
 							ReactiveMusic.LOGGER.error("Failed to load song stream: " + currentSong);
@@ -96,8 +112,18 @@ public class PlayerThread extends Thread {
 					}
 					loadFailedLogged = false;
 
+					String lowerName = fileName.toLowerCase(java.util.Locale.ROOT);
 					try {
-						player = new AdvancedPlayer(currentSongResource.inputStream);
+						player = null;
+						oggPlayer = null;
+						wavPlayer = null;
+						if (lowerName.endsWith(".ogg")) {
+							oggPlayer = new OggPlayer(currentSongResource.inputStream);
+						} else if (lowerName.endsWith(".wav")) {
+							wavPlayer = new WavPlayer(currentSongResource.inputStream);
+						} else {
+							player = new AdvancedPlayer(currentSongResource.inputStream);
+						}
 					} catch(Exception e) {
 						ReactiveMusic.LOGGER.error("Failed to create player for " + currentSong, e);
 						Thread.sleep(500);
@@ -118,6 +144,38 @@ public class PlayerThread extends Thread {
 					playing = true;
 					try {
 						player.play();
+					} catch(Exception e) {
+						ReactiveMusic.LOGGER.error("Error during playback of " + currentSong, e);
+					} finally {
+						playing = false;
+					}
+
+				}
+				else if(oggPlayer != null && !oggPlayer.isDone()) {
+
+					setGainPercentage(1.0f);
+					processRealGain();
+
+					ReactiveMusic.LOGGER.info("Playing " + currentSong);
+					playing = true;
+					try {
+						oggPlayer.play();
+					} catch(Exception e) {
+						ReactiveMusic.LOGGER.error("Error during playback of " + currentSong, e);
+					} finally {
+						playing = false;
+					}
+
+				}
+				else if(wavPlayer != null && !wavPlayer.isDone()) {
+
+					setGainPercentage(1.0f);
+					processRealGain();
+
+					ReactiveMusic.LOGGER.info("Playing " + currentSong);
+					playing = true;
+					try {
+						wavPlayer.play();
 					} catch(Exception e) {
 						ReactiveMusic.LOGGER.error("Error during playback of " + currentSong, e);
 					} finally {
@@ -152,6 +210,10 @@ public class PlayerThread extends Thread {
 
 		if(player != null)
 			player.queuedToStop = true;
+		if(oggPlayer != null)
+			oggPlayer.queuedToStop = true;
+		if(wavPlayer != null)
+			wavPlayer.queuedToStop = true;
 
 		queued = false;
 		currentSong = null;
@@ -254,6 +316,7 @@ public class PlayerThread extends Thread {
 		//ReactiveMusic.LOGGER.info("Current gain: " + newRealGain);
 
 		realGain = newRealGain;
+		PcmPlayer.gameGainDb = newRealGain;
 		if(player != null) {
 			AudioDevice device = player.getAudioDevice();
 			if(device != null && device instanceof JavaSoundAudioDevice) {
