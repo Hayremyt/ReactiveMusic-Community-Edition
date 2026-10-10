@@ -7,8 +7,10 @@ import org.rm_yaml.snakeyaml.Yaml;
 import org.rm_yaml.snakeyaml.constructor.Constructor;
 import rm_javazoom.jl.decoder.Bitstream;
 
+import javax.sound.sampled.AudioSystem;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
@@ -16,6 +18,83 @@ import java.util.*;
 public class RMSongpackLoader {
 
     public static List<SongpackZip> availableSongpacks = new ArrayList<>();
+
+    public static final String[] SONG_EXTENSIONS = { ".mp3", ".ogg", ".wav" };
+
+    /** Zip filesystem reference with ownership (only close what you created, the player may share it). */
+    private static class ZipFs {
+        FileSystem fs;
+        boolean owned;
+    }
+
+    private static ZipFs acquirePackZipFs(Path zipPath) throws IOException {
+        ZipFs ref = new ZipFs();
+        try {
+            Map<String, String> env = new HashMap<>();
+            env.put("create", "false");
+            ref.fs = FileSystems.newFileSystem(zipPath, env);
+            ref.owned = true;
+        } catch (FileSystemAlreadyExistsException e) {
+            ref.fs = FileSystems.getFileSystem(URI.create("jar:" + zipPath.toUri()));
+            ref.owned = false;
+        }
+        return ref;
+    }
+
+    private static void releasePackZipFs(ZipFs ref) {
+        if (ref != null && ref.owned && ref.fs != null) {
+            try {
+                ref.fs.close();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * Resolves a song name to "music/&lt;name&gt;.&lt;ext&gt;". Bare names prefer .mp3
+     * (legacy behavior), explicit .mp3/.ogg/.wav endings are honored. Null when nothing matches.
+     */
+    public static String resolveSongFile(Path dirPath, String song, boolean embedded) {
+        String lower = song.toLowerCase(Locale.ROOT);
+        for (String ext : SONG_EXTENSIONS) {
+            if (lower.endsWith(ext)) {
+                String fileName = "music/" + song;
+                return songFileExists(dirPath, fileName, embedded) ? fileName : null;
+            }
+        }
+        for (String ext : SONG_EXTENSIONS) {
+            String fileName = "music/" + song + ext;
+            if (songFileExists(dirPath, fileName, embedded)) return fileName;
+        }
+        return null;
+    }
+
+    private static boolean songFileExists(Path dirPath, String fileName, boolean embedded) {
+        if (embedded) {
+            try (InputStream in = RMSongpackLoader.class.getResourceAsStream("/musicpack/" + fileName)) {
+                return in != null;
+            } catch (IOException e) {
+                return false;
+            }
+        }
+
+        if (dirPath == null) return false;
+
+        // Check if path is a zip file
+        if (Files.isRegularFile(dirPath) && dirPath.toString().endsWith(".zip")) {
+            ZipFs ref = null;
+            try {
+                ref = acquirePackZipFs(dirPath);
+                return Files.exists(ref.fs.getPath(fileName));
+            } catch (Exception e) {
+                return false;
+            } finally {
+                releasePackZipFs(ref);
+            }
+        }
+
+        return Files.exists(dirPath.resolve(fileName));
+    }
 
     public static MusicPackResource getInputStream(Path dirPath, String fileName, boolean embedded) {
         MusicPackResource resource = new MusicPackResource();
@@ -33,21 +112,27 @@ public class RMSongpackLoader {
 
         // Check if path is a zip file
         if (Files.isRegularFile(dirPath) && dirPath.toString().endsWith(".zip")) {
-            Map<String, String> env = new HashMap<>();
-            env.put("create", "false");
-
+            ZipFs ref = null;
             try {
-                FileSystem fs = FileSystems.newFileSystem(dirPath, env);
-                Path filePath = fs.getPath(fileName);
+                ref = acquirePackZipFs(dirPath);
+                Path filePath = ref.fs.getPath(fileName);
                 if (Files.exists(filePath)) {
                     resource.inputStream = Files.newInputStream(filePath);
-                    resource.fileSystem = fs;
+                    // ownership transfers to the resource, do not release here
+                    resource.fileSystem = ref.fs;
+                    ref.owned = false;
                     return resource;
                 }
             } catch (IOException e) {
                 ReactiveMusic.LOGGER.error("Failed while loading file from zip " + e.getMessage());
                 return null;
+            } catch (RuntimeException e) {
+                ReactiveMusic.LOGGER.error("Failed while loading file from zip " + e.getMessage());
+                return null;
+            } finally {
+                releasePackZipFs(ref);
             }
+            return null;
         }
 
         // handle normal directories
@@ -110,15 +195,22 @@ public class RMSongpackLoader {
 
             // zip files
             if (Files.isRegularFile(packPath) && packPath.toString().endsWith(".zip")) {
-                try (FileSystem fs = FileSystems.newFileSystem(packPath, (ClassLoader) null)) {
+                ZipFs ref = null;
+                try {
+                    ref = acquirePackZipFs(packPath);
 
-                    Path root = fs.getPath("/");
+                    Path root = ref.fs.getPath("/");
 
                     yamlFileNames = getYamlFiles(Files.list(root).toList());
 
                 } catch (IOException e) {
                     ReactiveMusic.LOGGER.error("Failed reading zip: " + e);
                     continue;
+                } catch (RuntimeException e) {
+                    ReactiveMusic.LOGGER.error("Failed reading zip: " + e);
+                    continue;
+                } finally {
+                    releasePackZipFs(ref);
                 }
             }
 
@@ -275,15 +367,15 @@ public class RMSongpackLoader {
             for (int j = songpackZip.config.entries[i].songs.length - 1; j >= 0; j--) {
 
                 String song = songpackZip.config.entries[i].songs[j];
-                var inputStream = getInputStream(songpackZip.path, "music/" + song + ".mp3", songpackZip.embedded);
+                String fileName = resolveSongFile(songpackZip.path, song, songpackZip.embedded);
 
-                if (inputStream == null || inputStream.inputStream == null) {
+                if (fileName == null) {
                     StringBuilder eventName = new StringBuilder();
                     for (int k = 0; k < songpackZip.config.entries[i].events.length; k++) {
                         eventName.append(songpackZip.config.entries[i].events[k].toString());
                     }
 
-                    songpackZip.errorString += "Failed finding song: \"" + song + "\" for event: \"" + eventName + "\" (looked in " + describeSongLocation(songpackZip) + ")\n\n";
+                    songpackZip.errorString += "Failed finding song: \"" + song + "\" for event: \"" + eventName + "\" (looked for .mp3/.ogg/.wav in " + describeSongLocation(songpackZip) + ")\n\n";
 
                     // remove this invalid audio file
                     // this is unoptimized and slow but it's fine
@@ -294,13 +386,30 @@ public class RMSongpackLoader {
 
 
                     // songpackZip.blockLoading = true;
-                } else if (!isPlayableMp3(inputStream.inputStream)) {
+                    continue;
+                }
+
+                var inputStream = getInputStream(songpackZip.path, fileName, songpackZip.embedded);
+
+                if (inputStream == null || inputStream.inputStream == null) {
                     StringBuilder eventName = new StringBuilder();
                     for (int k = 0; k < songpackZip.config.entries[i].events.length; k++) {
                         eventName.append(songpackZip.config.entries[i].events[k].toString());
                     }
 
-                    songpackZip.errorString += "Song \"" + song + "\" for event: \"" + eventName + "\" is not a valid MP3 file and will be skipped (renamed .m4a/.ogg/.wav files do not play, convert them to MP3)\n\n";
+                    songpackZip.errorString += "Failed opening song: \"" + song + "\" for event: \"" + eventName + "\"\n\n";
+
+                    java.util.List<String> list = new java.util.ArrayList<>(java.util.Arrays.asList(songpackZip.config.entries[i].songs));
+                    list.remove(j);
+                    songpackZip.config.entries[i].songs = list.toArray(new String[0]);
+                } else if (!isPlayableAudio(inputStream.inputStream, fileName)) {
+                    StringBuilder eventName = new StringBuilder();
+                    for (int k = 0; k < songpackZip.config.entries[i].events.length; k++) {
+                        eventName.append(songpackZip.config.entries[i].events[k].toString());
+                    }
+
+                    String ext = fileName.substring(fileName.lastIndexOf('.') + 1).toUpperCase(Locale.ROOT);
+                    songpackZip.errorString += "Song \"" + song + "\" for event: \"" + eventName + "\" is not a valid " + ext + " file and will be skipped\n\n";
 
                     java.util.List<String> list = new java.util.ArrayList<>(java.util.Arrays.asList(songpackZip.config.entries[i].songs));
                     list.remove(j);
@@ -338,6 +447,38 @@ public class RMSongpackLoader {
                     bitstream.close();
                 } catch (Exception ignored) {}
             }
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isPlayableAudio(InputStream in, String fileName) {
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        try {
+            if (lower.endsWith(".ogg")) return isPlayableOgg(in);
+            if (lower.endsWith(".wav")) return isPlayableWav(in);
+            return isPlayableMp3(in);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** OGG container magic, full decode check happens at playback (thread survives errors). */
+    private static boolean isPlayableOgg(InputStream in) throws IOException {
+        byte[] magic = new byte[4];
+        int read = 0;
+        while (read < 4) {
+            int n = in.read(magic, read, 4 - read);
+            if (n < 0) return false;
+            read += n;
+        }
+        return magic[0] == 'O' && magic[1] == 'g' && magic[2] == 'g' && magic[3] == 'S';
+    }
+
+    /** WAV header parsed by the JDK itself, no audio hardware needed. */
+    private static boolean isPlayableWav(InputStream in) {
+        try (var audio = AudioSystem.getAudioInputStream(new java.io.BufferedInputStream(in))) {
+            return true;
         } catch (Exception e) {
             return false;
         }
