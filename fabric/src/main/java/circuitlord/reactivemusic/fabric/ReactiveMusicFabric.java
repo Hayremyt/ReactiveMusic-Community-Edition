@@ -78,6 +78,38 @@ public class ReactiveMusicFabric implements ClientModInitializer {
                             return 1;
                         })
                 )
+
+                .then(ClientCommandManager.literal("pause")
+                        .executes(context -> {
+                            ReactiveMusic.pauseMusic();
+                            context.getSource().sendFeedback(Text.literal("[ReactiveMusic]: Music paused."));
+                            return 1;
+                        })
+                )
+
+                .then(ClientCommandManager.literal("resume")
+                        .executes(context -> {
+                            ReactiveMusic.resumeMusic();
+                            context.getSource().sendFeedback(Text.literal("[ReactiveMusic]: Music resumed."));
+                            return 1;
+                        })
+                )
+
+                .then(ClientCommandManager.literal("skip")
+                        .executes(context -> {
+                            ReactiveMusic.skipSong();
+                            context.getSource().sendFeedback(Text.literal("[ReactiveMusic]: Skipped song."));
+                            return 1;
+                        })
+                )
+
+                .then(ClientCommandManager.literal("next")
+                        .executes(context -> {
+                            ReactiveMusic.skipSong();
+                            context.getSource().sendFeedback(Text.literal("[ReactiveMusic]: Skipped song."));
+                            return 1;
+                        })
+                )
             )
         );
     }
