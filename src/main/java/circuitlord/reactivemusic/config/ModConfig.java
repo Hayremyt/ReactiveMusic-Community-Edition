@@ -49,7 +49,17 @@ public class ModConfig {
 
     public boolean debugModeEnabled = false;
 
+    public boolean showNowPlayingToast = true;
+
+    // Y thresholds for height-based events, absolute block Y (defaults match vanilla overworld generation)
+    public int undergroundMaxY = 55;
+    public int deepUndergroundMaxY = 15;
+    public int highUpMinY = 128;
+
     public String loadedUserSongpack = "";
+
+    // multi-pack mode: songpack names merged in listed order (empty = legacy single-pack behavior)
+    public List<String> activeSongpacks = new ArrayList<>();
 
     public List<String> blacklistedDimensions = new ArrayList<>();
 
@@ -58,6 +68,9 @@ public class ModConfig {
     public List<String> soundsMuteMusic = new ArrayList<>();
 
     public List<String> soundsMuteMusicIgnoreDistance = new ArrayList<>();
+
+    // extra biome tags usable as BIOMETAG= in any songpack (modded tags like "is_alpine", vanilla "has_structure" tags, ...)
+    public List<String> customBiomeTags = new ArrayList<>();
 
     public boolean hasForcedInitialVolume = false;
 
@@ -71,6 +84,9 @@ public class ModConfig {
         } else {
             getConfig().loadedUserSongpack = songpack.config.name;
         }
+
+        // single-pack selection exits multi-pack mode
+        getConfig().activeSongpacks.clear();
 
         GSON.save();
         ReactiveMusic.setActiveSongpack(songpack);
@@ -554,10 +570,13 @@ public class ModConfig {
         }
 
         private boolean isLoaded(SongpackZip songpack) {
-            return ReactiveMusic.currentSongpack != null
-                    && ReactiveMusic.currentSongpack.config != null
-                    && songpack.config != null
-                    && Objects.equals(ReactiveMusic.currentSongpack.config.name, songpack.config.name);
+            if (songpack.config == null) return false;
+            for (SongpackZip active : ReactiveMusic.getActiveSongpacks()) {
+                if (active.config != null && Objects.equals(active.config.name, songpack.config.name)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private String statusText(SongpackZip songpack) {
@@ -721,7 +740,9 @@ public class ModConfig {
             if (instance.savedHomePositions == null) instance.savedHomePositions = new HashMap<>();
             if (instance.soundsMuteMusic == null) instance.soundsMuteMusic = new ArrayList<>();
             if (instance.soundsMuteMusicIgnoreDistance == null) instance.soundsMuteMusicIgnoreDistance = new ArrayList<>();
+            if (instance.customBiomeTags == null) instance.customBiomeTags = new ArrayList<>();
             if (instance.loadedUserSongpack == null) instance.loadedUserSongpack = "";
+            if (instance.activeSongpacks == null) instance.activeSongpacks = new ArrayList<>();
             if (instance.musicDelayLength2 == null) instance.musicDelayLength2 = MusicDelayLength.SONGPACK_DEFAULT;
             if (instance.musicSwitchSpeed2 == null) instance.musicSwitchSpeed2 = MusicSwitchSpeed.SONGPACK_DEFAULT;
         }
