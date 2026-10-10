@@ -29,6 +29,9 @@ public class SongpackEntry {
 
     public float forceChance = 1.0f;
 
+    // skip the musicDelayLength silence before starting this entry (good for BOSS/CREDITS with LONG delay)
+    public boolean ignoreMusicDelay = false;
+
     public boolean startMusicOnEventValid = false;
 
     // deprecated for now
