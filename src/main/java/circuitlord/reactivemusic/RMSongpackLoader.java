@@ -1,11 +1,14 @@
 package circuitlord.reactivemusic;
 
 import circuitlord.reactivemusic.entries.RMRuntimeEntry;
+import circuitlord.reactivemusic.platform.BiomeTagHelper;
 import circuitlord.reactivemusic.platform.PlatformHelper;
 import org.rm_yaml.snakeyaml.Yaml;
 import org.rm_yaml.snakeyaml.constructor.Constructor;
+import rm_javazoom.jl.decoder.Bitstream;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
@@ -68,6 +71,20 @@ public class RMSongpackLoader {
     public static void fetchAvailableSongpacks() {
         long startTime = System.currentTimeMillis();
         availableSongpacks.clear();
+
+        // user-defined biome tags from the config, usable as BIOMETAG= in any songpack
+        if (ReactiveMusic.config != null && ReactiveMusic.config.customBiomeTags != null) {
+            for (String rawTag : ReactiveMusic.config.customBiomeTags) {
+                if (rawTag == null || rawTag.isBlank()) continue;
+                String path = RMRuntimeEntry.normalizeBiomeTagPath(rawTag);
+                var biomeTag = BiomeTagHelper.INSTANCE.createBiomeTagKey(path);
+                if (biomeTag != null) {
+                    SongPicker.registerBiomeTag(biomeTag);
+                } else {
+                    ReactiveMusic.LOGGER.warn("Custom biome tag '" + rawTag + "' is not available on this platform, ignoring.");
+                }
+            }
+        }
 
         // Load embedded songpack
         availableSongpacks.add(loadSongpack(null, true, "ReactiveMusic.yaml"));
@@ -220,6 +237,12 @@ public class RMSongpackLoader {
 
             if (runtimeEntry.conditions.isEmpty()) continue;
 
+            // entries with no playable songs would win priority and play silence forever
+            if (runtimeEntry.songs.isEmpty()) {
+                songpackZip.errorString += "Entry \"" + runtimeEntry.eventString + "\" has no valid songs left and will be skipped.\n\n";
+                continue;
+            }
+
             runtimeEntries.add(runtimeEntry);
         }
 
@@ -254,13 +277,13 @@ public class RMSongpackLoader {
                 String song = songpackZip.config.entries[i].songs[j];
                 var inputStream = getInputStream(songpackZip.path, "music/" + song + ".mp3", songpackZip.embedded);
 
-                if (inputStream == null) {
+                if (inputStream == null || inputStream.inputStream == null) {
                     StringBuilder eventName = new StringBuilder();
                     for (int k = 0; k < songpackZip.config.entries[i].events.length; k++) {
                         eventName.append(songpackZip.config.entries[i].events[k].toString());
                     }
 
-                    songpackZip.errorString += "Failed finding song: \"" + song + "\" for event: \"" + eventName + "\"\n\n";
+                    songpackZip.errorString += "Failed finding song: \"" + song + "\" for event: \"" + eventName + "\" (looked in " + describeSongLocation(songpackZip) + ")\n\n";
 
                     // remove this invalid audio file
                     // this is unoptimized and slow but it's fine
@@ -271,12 +294,52 @@ public class RMSongpackLoader {
 
 
                     // songpackZip.blockLoading = true;
+                } else if (!isPlayableMp3(inputStream.inputStream)) {
+                    StringBuilder eventName = new StringBuilder();
+                    for (int k = 0; k < songpackZip.config.entries[i].events.length; k++) {
+                        eventName.append(songpackZip.config.entries[i].events[k].toString());
+                    }
+
+                    songpackZip.errorString += "Song \"" + song + "\" for event: \"" + eventName + "\" is not a valid MP3 file and will be skipped (renamed .m4a/.ogg/.wav files do not play, convert them to MP3)\n\n";
+
+                    java.util.List<String> list = new java.util.ArrayList<>(java.util.Arrays.asList(songpackZip.config.entries[i].songs));
+                    list.remove(j);
+                    songpackZip.config.entries[i].songs = list.toArray(new String[0]);
+
+                    try {
+                        inputStream.close();
+                    } catch (Exception ignored) {}
                 } else {
                     try {
                         inputStream.close();
                     } catch (Exception ignored) {}
                 }
             }
+        }
+    }
+
+    private static String describeSongLocation(SongpackZip songpackZip) {
+        if (songpackZip.embedded) return "embedded musicpack";
+        if (songpackZip.path != null) return songpackZip.path + "/music/";
+        return "unknown path";
+    }
+
+    /**
+     * Peeks at the stream with the real MP3 parser. Catches renamed containers
+     * (m4a/mp4, ogg, wav) that would otherwise "play" as silence.
+     */
+    private static boolean isPlayableMp3(InputStream in) {
+        try {
+            Bitstream bitstream = new Bitstream(in);
+            try {
+                return bitstream.readFrame() != null;
+            } finally {
+                try {
+                    bitstream.close();
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            return false;
         }
     }
 
