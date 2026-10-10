@@ -41,6 +41,8 @@ public class ReactiveMusic {
 	static boolean queuedToStopMusic = false;
 	static boolean queuedToPlayMusic = false;
 
+	public static boolean pausedByUser = false;
+
 	//static List<RMRuntimeEntry> currentEntries = new ArrayList<>();
 
 	static String currentSong = null;
@@ -137,6 +139,11 @@ public class ReactiveMusic {
 				setActiveSongpack(RMSongpackLoader.availableSongpacks.get(0));
 			}
 		}
+
+		// multi-pack mode: merge entries from every configured pack (primary first)
+		if (!config.activeSongpacks.isEmpty()) {
+			refreshLoadedEntries();
+		}
 	}
 
 	public static void newTick() {
@@ -223,6 +230,10 @@ public class ReactiveMusic {
 		if (currentDimBlacklisted)
 			newEntry = null;
 
+		// user paused the music, fade out and don't start anything new
+		if (pausedByUser)
+			newEntry = null;
+
 
 		if (newEntry != null) {
 
@@ -265,7 +276,7 @@ public class ReactiveMusic {
 				boolean shouldFadeOutMusic = false;
 
 				// handle fade-out if something's playing when a new event becomes valid
-				if (waitForStopTicks > getMusicStopSpeed(currentSongpack)) {
+				if (waitForStopTicks > getMusicStopSpeed(packForEntry(newEntry))) {
 					shouldFadeOutMusic = true;
 				}
 
@@ -290,12 +301,17 @@ public class ReactiveMusic {
 
 				boolean shouldStartNewSong = false;
 
-				if (waitForNewSongTicks > getMusicDelay(currentSongpack)) {
+				if (waitForNewSongTicks > getMusicDelay(packForEntry(newEntry))) {
 					shouldStartNewSong = true;
 				}
 
 				// if we're queued to start a new song and we're not playing anything, do it
 				if (queuedToPlayMusic) {
+					shouldStartNewSong = true;
+				}
+
+				// entries can opt out of the silence delay (BOSS/CREDITS with LONG delay)
+				if (newEntry.ignoreMusicDelay) {
 					shouldStartNewSong = true;
 				}
 
@@ -485,7 +501,8 @@ public class ReactiveMusic {
 		if (song != null) {
             doDebugLog("Changing entry: " + newEntry.eventString + " Song name: " + song);
 
-			thread.play(song);
+			SongToast.show(song, newEntry.songpack);
+			thread.play(song, packForEntry(newEntry));
 		}
 		else {
 			// TODO: maybe a better way to do this that doesn't spam?
@@ -503,20 +520,64 @@ public class ReactiveMusic {
 
 	public static void setActiveSongpack(SongpackZip songpackZip) {
 
-		// TODO: more than one songpack?
-		if (currentSongpack != null) {
-			deactivateSongpack(currentSongpack);
-		}
-
 		resetPlayer();
+
+		// switching packs is a fresh start
+		pausedByUser = false;
 
 		currentSongpack = songpackZip;
 
-		loadedEntries = songpackZip.runtimeEntries;
+		refreshLoadedEntries();
 
 		// always start new music immediately
 		queuedToPlayMusic = true;
 
+	}
+
+	public static SongpackZip findSongpackByName(String name) {
+		if (name == null) return null;
+		for (var pack : RMSongpackLoader.availableSongpacks) {
+			if (pack != null && pack.config != null && name.equals(pack.config.name)) return pack;
+		}
+		return null;
+	}
+
+	public static List<SongpackZip> getActiveSongpacks() {
+		// multi-pack mode, merged in listed order
+		if (config != null && config.activeSongpacks != null && !config.activeSongpacks.isEmpty()) {
+			List<SongpackZip> packs = new ArrayList<>();
+			for (String name : config.activeSongpacks) {
+				SongpackZip pack = findSongpackByName(name);
+				if (pack != null && !pack.blockLoading && pack.config != null && !packs.contains(pack)) {
+					packs.add(pack);
+				}
+			}
+			if (!packs.isEmpty()) return packs;
+		}
+
+		// legacy single-pack mode
+		if (currentSongpack != null) return List.of(currentSongpack);
+		return List.of();
+	}
+
+	public static void refreshLoadedEntries() {
+		List<RMRuntimeEntry> entries = new ArrayList<>();
+		List<SongpackZip> packs = getActiveSongpacks();
+		for (SongpackZip pack : packs) {
+			if (pack.runtimeEntries != null) entries.addAll(pack.runtimeEntries);
+		}
+		loadedEntries = entries;
+		if (!packs.isEmpty()) {
+			currentSongpack = packs.get(0);
+		}
+	}
+
+	static SongpackZip packForEntry(RMRuntimeEntry entry) {
+		if (entry != null) {
+			SongpackZip pack = findSongpackByName(entry.songpack);
+			if (pack != null) return pack;
+		}
+		return currentSongpack;
 	}
 
 	public static void deactivateSongpack(SongpackZip songpackZip) {
@@ -528,6 +589,25 @@ public class ReactiveMusic {
 			}
 		}
 
+	}
+
+	public static void pauseMusic() {
+		pausedByUser = true;
+	}
+
+	public static void resumeMusic() {
+		pausedByUser = false;
+		if (thread == null || thread.notQueuedOrPlaying()) {
+			queuedToPlayMusic = true;
+		}
+	}
+
+	public static void skipSong() {
+		if (currentSong != null) {
+			SongPicker.markSongRecent(currentSong);
+		}
+		resetPlayer();
+		queuedToPlayMusic = true;
 	}
 
 	public static int getMusicStopSpeed(SongpackZip songpack) {
