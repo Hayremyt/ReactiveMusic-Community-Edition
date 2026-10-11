@@ -32,6 +32,9 @@ public class SongpackEntry {
     // skip the musicDelayLength silence before starting this entry (good for BOSS/CREDITS with LONG delay)
     public boolean ignoreMusicDelay = false;
 
+    // if valid, win over every entry without this flag regardless of file order (good for BOSS)
+    public boolean alwaysOverride = false;
+
     public boolean startMusicOnEventValid = false;
 
     // deprecated for now
