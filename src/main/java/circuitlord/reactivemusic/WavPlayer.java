@@ -27,12 +27,14 @@ public class WavPlayer {
         AudioInputStream raw = AudioSystem.getAudioInputStream(new BufferedInputStream(in));
 
         AudioFormat base = raw.getFormat();
+        int outChannels = Math.min(Math.max(base.getChannels(), 1), 2);
         AudioInputStream decoded;
-        if (base.getEncoding().equals(AudioFormat.Encoding.PCM_SIGNED) && base.getSampleSizeInBits() == 16) {
+        if (base.getEncoding().equals(AudioFormat.Encoding.PCM_SIGNED)
+                && base.getSampleSizeInBits() == 16 && base.getChannels() == outChannels) {
             decoded = raw;
         } else {
             AudioFormat target = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED,
-                    base.getSampleRate(), 16, base.getChannels(), base.getChannels() * 2,
+                    base.getSampleRate(), 16, outChannels, outChannels * 2,
                     base.getSampleRate(), false);
             decoded = AudioSystem.getAudioInputStream(target, raw);
         }
