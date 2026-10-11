@@ -29,7 +29,7 @@ public class RMEntryCondition {
 
     public List<RMEntryEntityCondition> entityTypes = new ArrayList<>();
 
-    public List<String> bossTypes = new ArrayList<>();
+    public List<RMEntryBossCondition> bossTypes = new ArrayList<>();
 
     // negated ("!EVENT") lists, none of these may match for the condition to be valid
     public List<SongpackEventType> negSongpackEvents = new ArrayList<>();
@@ -45,6 +45,6 @@ public class RMEntryCondition {
 
     public List<RMEntryEntityCondition> negEntityTypes = new ArrayList<>();
 
-    public List<String> negBossTypes = new ArrayList<>();
+    public List<RMEntryBossCondition> negBossTypes = new ArrayList<>();
 
 }
