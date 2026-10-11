@@ -120,6 +120,7 @@ public class RMSongpackLoader {
                     resource.inputStream = Files.newInputStream(filePath);
                     // ownership transfers to the resource, do not release here
                     resource.fileSystem = ref.fs;
+                    resource.ownsFileSystem = ref.owned;
                     ref.owned = false;
                     return resource;
                 }
