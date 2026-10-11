@@ -62,23 +62,56 @@ Here's an example songpack entry:
 ```
 
 - `(SongpackEventType) events` The specific events that need to be valid for this entry to play. (see details below)
-- `(Boolean) allowFallback` (default false) If we've played all songs from this event, should  we "fallback" to other events that are also valid? (good for one-off events you don't want to play over and over)
 - `(String[]) songs` The list of song files to pick from when this event plays. These are picked from the `music` sub-folder. Names can be bare (`"Freedom"` prefers `.mp3`, old packs keep working as-is) or carry an explicit extension (`"Intro.ogg"`, `"Outro.wav"`). Supported formats: `.mp3`, `.ogg` (Vorbis), `.wav` (surround files are downmixed to stereo). Anything else (renamed `.m4a`, etc.) is rejected at load with an error instead of playing silence.
 
 <br><br>
 
-There are also a couple of other advanced params you can use:
+### Entry flags
 
-`(Boolean) forceStopMusicOnChanged` (default false) Force stop the current music when this event becomes valid/invalid. Good for when you definitely want the music to switch from whatever's currently playing (boss, nether, etc)
-- this also has variations as `forceStopMusicOnValid` and `forceStopMusicOnInvalid` if you want specific behavior
+#### `allowFallback` (Boolean, default false)
+If we've played all songs from this entry recently, borrow fresh ones from lower valid entries instead of repeating. Good for one-off events you don't want on loop.
+```
+  - events: [ "HOME", "SNOW", "NIGHT" ]
+    allowFallback: true
+    songs:
+      - "WintersNight"
+```
 
-`(Boolean) forceStartMusicOnValid` (default false) If this event becomes valid, and the music stops naturally or because of forceStop, then play this event immediately.
+#### `forceStopMusicOnChanged` (Boolean, default false)
+Stop the current music when this entry becomes valid OR invalid (sets both directions below). Good when the music must switch no matter what (boss, nether).
 
-`(float) forceChance` (default 1.0f) If forceStop/Start is enabled, what is the chance it happens? Good for events where you only want the music to switch sometimes.
+#### `forceStopMusicOnValid` (Boolean, default false)
+Stop the current music only when this entry becomes valid.
 
-`(Boolean) ignoreMusicDelay` (default false) Skip the `musicDelayLength` silence before starting this entry. Good for BOSS/CREDITS entries when you use a LONG delay everywhere else.
+#### `forceStopMusicOnInvalid` (Boolean, default false)
+Stop the current music only when this entry becomes invalid. The music then falls back down the list.
 
-`(Boolean) alwaysOverride` (default false) If this entry is valid it wins over every entry without the flag, no matter where it sits in the file. Good for BOSS (boss interrupts home music). Combine with `forceStopMusicOnChanged` for an instant switch.
+#### `forceStartMusicOnValid` (Boolean, default false)
+When this entry becomes valid (and music stopped naturally or by a forceStop), start it immediately instead of waiting out the silence delay.
+```
+  - events: [ "BOSS" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    songs:
+      - "LastStand"
+```
+
+#### `forceChance` (float, default 1.0)
+Probability (0.0–1.0) for the force actions above. Rolled once per change, all actions of the entry share the roll. Good for events that should only sometimes interrupt.
+```
+  - events: [ "DIM=OVERWORLD", "SUNSET" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    forceChance: 0.5
+    songs:
+      - "Sombre"
+```
+
+#### `ignoreMusicDelay` (Boolean, default false)
+Skip the `musicDelayLength` silence before starting this entry. Good for BOSS/CREDITS entries when you use a LONG delay everywhere else.
+
+#### `alwaysOverride` (Boolean, default false)
+If this entry is valid it wins over every entry without the flag, no matter where it sits in the file. Good for BOSS (boss interrupts home music). Combine with `forceStopMusicOnChanged` for an instant switch.
 
 <br><br>
 
@@ -118,6 +151,21 @@ You can also negate any event with `!`:
   - events: [ "!BIOME=ocean", "!STRUCT=village" ]
     songs:
       - "Freedom"
+```
+
+## Conditions cheat-sheet
+
+Two kinds of things go into `events`, nothing else:
+
+- **Bare dictionary words** — fixed detectors, written as-is: `DAY`, `BOSS`, `RAID`, `NEARBY_MOBS`, `WARDEN`...
+- **Prefixed conditions** — for concrete objects: `BIOME=x`, `BIOMETAG=x`, `DIM=x`, `STRUCT=x`, `ENTITY=x`, `BLOCK=name,count`, `BOSS=name`
+
+Bare mob/structure names alone are errors, not matches:
+```
+  - events: [ "NEARBY_MOBS" ]     # right: any hostiles nearby
+  - events: [ "ENTITY=zombie" ]   # right: specific zombies
+  - events: [ "zombie" ]          # WRONG: unknown event, entry gets skipped with an error
+  - events: [ "STRUCT=village" ]  # right: village structure
 ```
 
 ## Entry priority (order matters!)
@@ -179,6 +227,11 @@ All available event types. Remember: within one entry, different events mean AND
 
 ### Location
 - `VILLAGE` (1 or more villagers within 30 blocks sideways / 15 up-down)
+
+### Special values
+- `GENERIC` (always true — the ultimate fallback, put it last if nothing else should leave silence)
+- `OVERWORLD` / `NETHER` / `END` (legacy dimension checks, prefer `DIM=` which also covers modded dimensions)
+- `NONE` (never matches anything, technical placeholder)
 
 ### Structure tags (from nearby mobs, all within the shared 64-block entity scan)
 - `NETHER_FORTRESS` (wither skeletons or blazes nearby)
