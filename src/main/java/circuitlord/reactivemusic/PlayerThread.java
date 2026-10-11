@@ -107,6 +107,7 @@ public class PlayerThread extends Thread {
 							ReactiveMusic.LOGGER.error("Failed to load song stream: " + currentSong);
 							loadFailedLogged = true;
 						}
+						closeSongResource();
 						Thread.sleep(500);
 						continue;
 					}
@@ -126,6 +127,7 @@ public class PlayerThread extends Thread {
 						}
 					} catch(Exception e) {
 						ReactiveMusic.LOGGER.error("Failed to create player for " + currentSong, e);
+						closeSongResource();
 						Thread.sleep(500);
 						continue;
 					}
@@ -219,15 +221,18 @@ public class PlayerThread extends Thread {
 		currentSong = null;
 		currentPack = null;
 
-		if (currentSongResource != null && currentSongResource.fileSystem != null) {
-            try {
-				currentSongResource.close();
-            } catch (Exception e) {
-                ReactiveMusic.LOGGER.error("Failed to close file system/input stream " + e.getMessage());
-            }
-        }
+		closeSongResource();
+	}
 
-		currentSongResource = null;
+	private void closeSongResource() {
+		if (currentSongResource != null) {
+			try {
+				currentSongResource.close();
+			} catch (Exception e) {
+				ReactiveMusic.LOGGER.error("Failed to close file system/input stream " + e.getMessage());
+			}
+			currentSongResource = null;
+		}
 	}
 
 	public void play(String song, SongpackZip pack) {
