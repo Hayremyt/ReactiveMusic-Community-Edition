@@ -9,9 +9,16 @@ public class MusicPackResource {
 
     public InputStream inputStream = null;
 
+    // false when the filesystem is shared (another song playing from the same zip),
+    // only close what you opened or you cut the other reader off
+    public boolean ownsFileSystem = true;
+
     public void close() throws Exception {
-        inputStream.close();
-        fileSystem.close();
+        try {
+            if (inputStream != null) inputStream.close();
+        } finally {
+            if (ownsFileSystem && fileSystem != null) fileSystem.close();
+        }
     }
 
 
