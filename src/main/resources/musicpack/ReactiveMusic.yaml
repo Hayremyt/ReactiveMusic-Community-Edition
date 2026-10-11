@@ -21,6 +21,14 @@ entries:
       - "Reverie"
 
 
+  # End credits
+  - events: [ "CREDITS" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    songs:
+      - "QuestsEnd"
+
+
   # Boss songs, always win while a boss bar is on-screen (even at home)
   - events: [ "BOSS" ]
     forceStopMusicOnChanged: true
