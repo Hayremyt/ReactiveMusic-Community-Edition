@@ -217,14 +217,35 @@ public class RMRuntimeEntry {
                 }
 
                 // specific bosses by boss bar title substring, BOSS=wither (bare BOSS still means any boss bar)
+                // optional HP phase: BOSS=wither,<50 (bar below 50%), BOSS=wither,>80
                 else if (eventSection.startsWith("boss=")) {
-                    String bossName = eventSection.substring(5);
-                    if (bossName.isEmpty())
-                        continue;
+                    String bossData = eventSection.substring(5);
+                    String[] parts = bossData.split(",");
 
-                    if (negated) condition.negBossTypes.add(bossName);
-                    else condition.bossTypes.add(bossName);
-                    eventHasData = true;
+                    if (parts.length >= 1 && !parts[0].isEmpty()) {
+                        RMEntryBossCondition bossCond = new RMEntryBossCondition();
+                        bossCond.name = parts[0];
+
+                        if (parts.length >= 2 && !parts[1].isEmpty()) {
+                            String percent = parts[1];
+                            if ((percent.startsWith("<") || percent.startsWith(">")) && percent.substring(1).matches("\\d+(\\.\\d+)?")) {
+                                float value = Float.parseFloat(percent.substring(1));
+                                if (percent.startsWith("<")) bossCond.belowPercent = value;
+                                else bossCond.abovePercent = value;
+                            }
+                            else {
+                                Entry.errorString += "Invalid boss percent: " + eventSection + "! Use <50 or >80.\n\n";
+                                continue;
+                            }
+                        }
+
+                        if (negated) condition.negBossTypes.add(bossCond);
+                        else condition.bossTypes.add(bossCond);
+                        eventHasData = true;
+                    }
+                    else {
+                        Entry.errorString += "Invalid syntax: " + eventSection + "!\n\n";
+                    }
                 }
 
                 // songpack events
