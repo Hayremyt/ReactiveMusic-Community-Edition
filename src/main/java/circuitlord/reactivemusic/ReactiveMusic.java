@@ -219,9 +219,15 @@ public class ReactiveMusic {
 
 		List<RMRuntimeEntry> validEntries = getValidEntries();
 
-		// Pick the highest priority one
+		// Pick the highest priority one, entries with alwaysOverride win regardless of file order
 		if (!validEntries.isEmpty()) {
 			newEntry = validEntries.get(0);
+			for (RMRuntimeEntry validEntry : validEntries) {
+				if (validEntry.alwaysOverride) {
+					newEntry = validEntry;
+					break;
+				}
+			}
 		}
 
 		processValidEvents(validEntries, previousValidEntries);
