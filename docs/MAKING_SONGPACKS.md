@@ -78,6 +78,8 @@ There are also a couple of other advanced params you can use:
 
 `(Boolean) ignoreMusicDelay` (default false) Skip the `musicDelayLength` silence before starting this entry. Good for BOSS/CREDITS entries when you use a LONG delay everywhere else.
 
+`(Boolean) alwaysOverride` (default false) If this entry is valid it wins over every entry without the flag, no matter where it sits in the file. Good for BOSS (boss interrupts home music). Combine with `forceStopMusicOnChanged` for an instant switch.
+
 <br><br>
 
 
@@ -120,7 +122,7 @@ You can also negate any event with `!`:
 
 ## Entry priority (order matters!)
 
-Every tick the mod collects all valid entries **in file order** and plays the first one. A broad entry placed high shadows everything below it while it stays valid.
+Every tick the mod collects all valid entries **in file order** and plays the first one. A broad entry placed high shadows everything below it while it stays valid. Exception: entries with `alwaysOverride: true` jump ahead of everything without the flag (first among themselves, still by file order).
 
 Order from specific to generic. Recommended chain for fights:
 
