@@ -250,8 +250,8 @@ All available event types. Remember: within one entry, different events mean AND
 
 ### Combat
 - `BOSS` (whenever a boss bar is on-screen)
-- `BOSS=name` (boss bar title contains `name`, e.g. `BOSS=wither`, `BOSS=dragon` — case-insensitive, spaces don't matter)
-- `BOSS=name,<percent` / `BOSS=name,>percent` (same, but only while the bar is below/above that HP percent — phase themes, e.g. `BOSS=wither,<50`)
+- `BOSS=name` (boss bar title contains `name`, e.g. `BOSS=wither`, `BOSS=dragon` — case-insensitive, spaces don't matter, any HP)
+- `BOSS=name,<percent` / `BOSS=name,>percent` (same, but only while the bar is strictly below/above that HP percent — phase themes, e.g. `BOSS=wither,<50`). Any number 0–100, decimals allowed (`<12.5`). The `<`/`>` sign is required (`BOSS=wither,50` is a pack error). With several same-named bars the lowest HP counts. Numbers outside 0–100 parse but are meaningless (`<150` is always true).
 
 ```
   # wither second phase theme, takes over when the bar drops below half
