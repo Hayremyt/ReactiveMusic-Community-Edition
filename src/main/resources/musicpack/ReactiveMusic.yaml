@@ -21,6 +21,16 @@ entries:
       - "Reverie"
 
 
+  # Boss songs, always win while a boss bar is on-screen (even at home)
+  - events: [ "BOSS" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    alwaysOverride: true
+    songs:
+      - "LastStand"
+      - "Ruthless"
+
+
   # super rare home song
   - events: [ "HOME", "SNOW", "NIGHT" ]
     forceStopMusicOnChanged: true
@@ -35,15 +45,6 @@ entries:
       - "KeeperOfTheForest"
       - "CastleInTheSky"
       - "CircleOfLife"
-
-
-  # Boss songs
-  - events: [ "BOSS" ]
-    forceStopMusicOnChanged: true
-    forceStartMusicOnValid: true
-    songs:
-      - "LastStand"
-      - "Ruthless"
 
 
   - events: [ "UNDERWATER" ]
