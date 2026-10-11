@@ -22,38 +22,60 @@ public class OggPlayer {
     private ByteBuffer fileData;
     private PcmPlayer pcm;
     private int channels;
+    private int outChannels;
     private short[] scratch = new short[0];
+    private short[] mixScratch = new short[0];
 
     public boolean isDone() {
         return complete;
     }
 
     public OggPlayer(InputStream in) throws Exception {
-        byte[] bytes = in.readAllBytes();
-        fileData = MemoryUtil.memAlloc(bytes.length);
-        fileData.put(bytes);
-        fileData.flip();
-
-        IntBuffer error = MemoryUtil.memAllocInt(1);
         try {
-            handle = STBVorbis.stb_vorbis_open_memory(fileData, error, null);
-            if (handle == 0) {
-                throw new Exception("not a valid OGG Vorbis stream (stb error " + error.get(0) + ")");
-            }
+            byte[] bytes = in.readAllBytes();
+            fileData = MemoryUtil.memAlloc(bytes.length);
+            fileData.put(bytes);
+            fileData.flip();
 
-            STBVorbisInfo info = STBVorbisInfo.malloc();
+            IntBuffer error = MemoryUtil.memAllocInt(1);
             try {
-                STBVorbis.stb_vorbis_get_info(handle, info);
-                channels = info.channels();
-                if (channels < 1 || channels > 8) {
-                    throw new Exception("unsupported channel count: " + channels);
+                handle = STBVorbis.stb_vorbis_open_memory(fileData, error, null);
+                if (handle == 0) {
+                    throw new Exception("not a valid OGG Vorbis stream (stb error " + error.get(0) + ")");
                 }
-                pcm = new PcmPlayer(info.sample_rate(), channels);
+
+                STBVorbisInfo info = STBVorbisInfo.malloc();
+                try {
+                    STBVorbis.stb_vorbis_get_info(handle, info);
+                    channels = info.channels();
+                    if (channels < 1 || channels > 8) {
+                        throw new Exception("unsupported channel count: " + channels);
+                    }
+                    // sound hardware is stereo at best, downmix the rest
+                    outChannels = Math.min(channels, 2);
+                    pcm = new PcmPlayer(info.sample_rate(), outChannels);
+                } finally {
+                    info.free();
+                }
             } finally {
-                info.free();
+                MemoryUtil.memFree(error);
             }
-        } finally {
-            MemoryUtil.memFree(error);
+        } catch (Exception e) {
+            close();
+            throw e;
+        }
+    }
+
+    /** Dual-mono average downmix, pure math, unit-testable without audio hardware. */
+    public static void mixDownToStereo(short[] in, int channels, short[] out, int samples) {
+        for (int i = 0; i < samples; i++) {
+            int sum = 0;
+            for (int c = 0; c < channels; c++) {
+                sum += in[i * channels + c];
+            }
+            short mixed = (short) (sum / channels);
+            out[i * 2] = mixed;
+            out[i * 2 + 1] = mixed;
         }
     }
 
@@ -73,7 +95,17 @@ public class OggPlayer {
                 buf.position(0);
                 buf.limit(shorts);
                 buf.get(scratch, 0, shorts);
-                pcm.write(scratch, 0, shorts);
+
+                if (channels <= 2) {
+                    pcm.write(scratch, 0, shorts);
+                } else {
+                    int outShorts = samples * outChannels;
+                    if (mixScratch.length < outShorts) {
+                        mixScratch = new short[outShorts];
+                    }
+                    mixDownToStereo(scratch, channels, mixScratch, samples);
+                    pcm.write(mixScratch, 0, outShorts);
+                }
             }
         } finally {
             complete = true;
@@ -84,9 +116,12 @@ public class OggPlayer {
 
     public void close() {
         if (handle != 0) {
-            try {
-                pcm.close(!queuedToStop);
-            } catch (Exception ignored) {
+            if (pcm != null) {
+                try {
+                    pcm.close(!queuedToStop);
+                } catch (Exception ignored) {
+                }
+                pcm = null;
             }
             try {
                 STBVorbis.stb_vorbis_close(handle);
