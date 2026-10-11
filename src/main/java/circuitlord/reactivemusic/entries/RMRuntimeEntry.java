@@ -34,6 +34,8 @@ public class RMRuntimeEntry {
 
     public boolean ignoreMusicDelay = false;
 
+    public boolean alwaysOverride = false;
+
     public List<String> songs = new ArrayList<>();
 
     public String eventString = "";
@@ -58,6 +60,8 @@ public class RMRuntimeEntry {
         Entry.forceChance = songpackEntry.forceChance;
 
         Entry.ignoreMusicDelay = songpackEntry.ignoreMusicDelay;
+
+        Entry.alwaysOverride = songpackEntry.alwaysOverride;
 
         if (songpackEntry.songs != null) {
             Entry.songs = Arrays.stream(songpackEntry.songs).toList();
