@@ -3,6 +3,7 @@ package circuitlord.reactivemusic;
 
 import circuitlord.reactivemusic.config.ModConfig;
 import circuitlord.reactivemusic.entries.RMEntryBlockCondition;
+import circuitlord.reactivemusic.entries.RMEntryBossCondition;
 import circuitlord.reactivemusic.entries.RMEntryEntityCondition;
 import circuitlord.reactivemusic.entries.RMRuntimeEntry;
 import circuitlord.reactivemusic.mixin.BossBarHudAccessor;
@@ -90,6 +91,9 @@ public final class SongPicker {
     public static Set<String> currentStructureNames = new HashSet<>();
 
     public static Set<String> currentBossNames = new HashSet<>();
+
+    // normalized boss bar title -> lowest percent (0-1) among matching bars
+    public static Map<String, Float> currentBossPercents = new HashMap<>();
 
     public static final int ENTITY_SCAN_RADIUS = 64;
     public static List<Entity> nearbyEntities = new ArrayList<>();
@@ -362,6 +366,7 @@ public final class SongPicker {
         // try to get boss bars
         boolean bossBarActive = false;
         currentBossNames.clear();
+        currentBossPercents.clear();
 
         if (mc.inGameHud != null && mc.inGameHud.getBossBarHud() != null) {
             try {
@@ -372,7 +377,13 @@ public final class SongPicker {
                     bossBarActive = true;
                     for (var bossBar : bossBars.values()) {
                         // strip whitespace, queries are whitespace-stripped too
-                        currentBossNames.add(bossBar.getName().getString().toLowerCase(Locale.ROOT).replaceAll("\\s", ""));
+                        String bossName = bossBar.getName().getString().toLowerCase(Locale.ROOT).replaceAll("\\s", "");
+                        currentBossNames.add(bossName);
+                        float percent = bossBar.getPercent();
+                        Float known = currentBossPercents.get(bossName);
+                        if (known == null || percent < known) {
+                            currentBossPercents.put(bossName, percent);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -756,12 +767,16 @@ public final class SongPicker {
         return false;
     }
 
-    static boolean anyBossMatches(List<String> bosses) {
-        for (var boss : bosses) {
+    static boolean anyBossMatches(List<RMEntryBossCondition> conds) {
+        for (var cond : conds) {
             for (var current : currentBossNames) {
-                if (current.contains(boss)) {
-                    return true;
-                }
+                if (!current.contains(cond.name)) continue;
+                Float percent = currentBossPercents.get(current);
+                if (percent == null) continue;
+                float hp = percent * 100f;
+                if (cond.belowPercent != null && !(hp < cond.belowPercent)) continue;
+                if (cond.abovePercent != null && !(hp > cond.abovePercent)) continue;
+                return true;
             }
         }
         return false;
