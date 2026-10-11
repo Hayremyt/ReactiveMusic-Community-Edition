@@ -251,6 +251,16 @@ All available event types. Remember: within one entry, different events mean AND
 ### Combat
 - `BOSS` (whenever a boss bar is on-screen)
 - `BOSS=name` (boss bar title contains `name`, e.g. `BOSS=wither`, `BOSS=dragon` — case-insensitive, spaces don't matter)
+- `BOSS=name,<percent` / `BOSS=name,>percent` (same, but only while the bar is below/above that HP percent — phase themes, e.g. `BOSS=wither,<50`)
+
+```
+  # wither second phase theme, takes over when the bar drops below half
+  - events: [ "BOSS=wither,<50" ]
+    forceStopMusicOnChanged: true
+    forceStartMusicOnValid: true
+    songs:
+      - "Mufaya-DarkAscension"
+```
 - `WARDEN`, `WITHER`, `DRAGON` (that boss mob nearby, no boss bar needed — WITHER matches the boss exactly, not skeletons)
 - `BATTLE` (5 or more distinct recent attackers within the last 10 seconds — a rough "outnumbered" detector)
 - `COMBAT` (an actual back-and-forth fight: 3+ hits traded in the last 10 seconds plus danger — recently hurt or hostile mobs nearby, so poking one zombie doesn't count. A single hit over 25% of your max HP counts on its own. Disabled in creative/spectator)
