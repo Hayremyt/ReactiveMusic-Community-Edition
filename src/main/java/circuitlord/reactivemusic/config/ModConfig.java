@@ -72,6 +72,9 @@ public class ModConfig {
     // extra biome tags usable as BIOMETAG= in any songpack (modded tags like "is_alpine", vanilla "has_structure" tags, ...)
     public List<String> customBiomeTags = new ArrayList<>();
 
+    // block id substrings that are not counted for BLOCK= conditions (e.g. "ore", "debris")
+    public List<String> blockCounterBlacklist = new ArrayList<>();
+
     public boolean hasForcedInitialVolume = false;
 
     public static Screen createScreen(Screen parent) {
@@ -741,6 +744,7 @@ public class ModConfig {
             if (instance.soundsMuteMusic == null) instance.soundsMuteMusic = new ArrayList<>();
             if (instance.soundsMuteMusicIgnoreDistance == null) instance.soundsMuteMusicIgnoreDistance = new ArrayList<>();
             if (instance.customBiomeTags == null) instance.customBiomeTags = new ArrayList<>();
+            if (instance.blockCounterBlacklist == null) instance.blockCounterBlacklist = new ArrayList<>();
             if (instance.loadedUserSongpack == null) instance.loadedUserSongpack = "";
             if (instance.activeSongpacks == null) instance.activeSongpacks = new ArrayList<>();
             if (instance.musicDelayLength2 == null) instance.musicDelayLength2 = MusicDelayLength.SONGPACK_DEFAULT;

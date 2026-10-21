@@ -53,9 +53,12 @@ public final class SongPicker {
     public static final int COMBAT_HIT_THRESHOLD = 3;
     public static final float COMBAT_HEAVY_HIT_FRACTION = 0.25f;
 
+    /** Sentinel for "this never happened". */
+    private static final long NEVER_HAPPENED = Long.MIN_VALUE;
+
     private static final List<Long> recentCombatHits = new ArrayList<>();
-    private static long lastDamageTakenTime = -100000L;
-    private static long lastHeavyHitTime = -100000L;
+    private static long lastDamageTakenTime = NEVER_HAPPENED;
+    private static long lastHeavyHitTime = NEVER_HAPPENED;
 
     public static void registerCombatHit() {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -74,13 +77,15 @@ public final class SongPicker {
     }
 
 
-    private static final Set<String> BLOCK_COUNTER_BLACKLIST = Set.of(); // = Set.of("ore", "debris");
     private static final Map<Block, String> BLOCK_ID_CACHE = new IdentityHashMap<>();
+
+    /** Radius in blocks of the cube that is scanned for block counts. */
+    public static final int BLOCK_SCAN_RADIUS = 25;
 
     public static boolean queuedToPrintBlockCounter = false;
     public static BlockPos cachedBlockCounterOrigin;
-    public static int currentBlockCounterX = 99999;
-    public static int currentBlockCounterY = 99999;
+    // starts outside the scan range, so the first tick wraps around to -BLOCK_SCAN_RADIUS
+    public static int currentBlockCounterX = BLOCK_SCAN_RADIUS + 1;
 
     public static Object2IntOpenHashMap<String> blockCounterMap = new Object2IntOpenHashMap<>();
     public static Object2IntOpenHashMap<String> cachedBlockChecker = new Object2IntOpenHashMap<>();
@@ -142,8 +147,8 @@ public final class SongPicker {
             nearbyEntityIds.clear();
             currentBossNames.clear();
             recentCombatHits.clear();
-            lastDamageTakenTime = -100000L;
-            lastHeavyHitTime = -100000L;
+            lastDamageTakenTime = NEVER_HAPPENED;
+            lastHeavyHitTime = NEVER_HAPPENED;
             return;
         }
 
@@ -449,7 +454,7 @@ public final class SongPicker {
 
     public static void tickBlockCounterMap() {
 
-        int RADIUS = 25;
+        final int RADIUS = BLOCK_SCAN_RADIUS;
 
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
@@ -457,31 +462,14 @@ public final class SongPicker {
         if (player == null || world == null)
             return;
 
-
-
-        // Advance y, then x
-/*        currentBlockCounterY++;
-        if (currentBlockCounterY > RADIUS) {
-            currentBlockCounterY = -RADIUS;
-
-            currentBlockCounterX++;
-
-            ReactiveMusic.LOGGER.info("blockchecker X:" + currentBlockCounterX);
-            if (currentBlockCounterX > RADIUS) {
-                currentBlockCounterX = -RADIUS;
-
-               // ReactiveMusic.LOGGER.info("blockchecker X:" + currentBlockCounterX);
-            }
-        }*/
-
-        // just X
+        // advance one column of the cube per tick
         currentBlockCounterX++;
         if (currentBlockCounterX > RADIUS) {
             currentBlockCounterX = -RADIUS;
         }
 
         // finished iterating, reset
-        if (currentBlockCounterX == -RADIUS/* && currentBlockCounterY == -RADIUS*/) {
+        if (currentBlockCounterX == -RADIUS) {
             // ReactiveMusic.LOGGER.info("Finished checking for blocks, resetting! Total: " + blockCounterMap.size());
 
             if (queuedToPrintBlockCounter) {
@@ -520,14 +508,7 @@ public final class SongPicker {
                 Block block = world.getBlockState(mutablePos).getBlock();
                 String key = getBlockId(block);
 
-                boolean isBlacklisted = false;
-                for (String black : BLOCK_COUNTER_BLACKLIST) {
-                    if (key.contains(black)) {
-                        isBlacklisted = true;
-                        break;
-                    }
-                }
-                if (isBlacklisted)
+                if (isBlacklisted(key))
                     continue;
 
                 blockCounterMap.addTo(key, 1);
@@ -539,6 +520,19 @@ public final class SongPicker {
     }
 
 
+
+    /** Block ids containing any of the configured blacklist entries are not counted. */
+    private static boolean isBlacklisted(String blockId) {
+        var blacklist = ReactiveMusic.config != null ? ReactiveMusic.config.blockCounterBlacklist : null;
+        if (blacklist == null || blacklist.isEmpty()) return false;
+
+        for (String black : blacklist) {
+            if (black != null && !black.isEmpty() && blockId.contains(black)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private static String getBlockId(Block block) {
         String id = BLOCK_ID_CACHE.get(block);

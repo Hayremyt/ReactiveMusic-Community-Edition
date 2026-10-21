@@ -51,8 +51,11 @@ public class ReactiveMusic {
 	//static List<SongpackEntry> currentGenericEntries = new ArrayList<>();
 	
 	//static String nextSong;
+	/** Tick counter value meaning "no silence delay is pending", so the first song starts right away. */
+	static final int NO_SONG_DELAY_PENDING = 99999;
+
 	static int waitForStopTicks = 0;
-	static int waitForNewSongTicks = 99999;
+	static int waitForNewSongTicks = NO_SONG_DELAY_PENDING;
 	static int fadeOutTicks = 0;
 	//static int fadeInTicks = 0;
 	static int silenceTicks = 0;
