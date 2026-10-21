@@ -251,11 +251,11 @@ All available event types. Remember: within one entry, different events mean AND
 ### Combat
 - `BOSS` (whenever a boss bar is on-screen)
 - `BOSS=name` (boss bar title contains `name`, e.g. `BOSS=wither`, `BOSS=dragon` — case-insensitive, spaces don't matter, any HP)
-- `BOSS=name,<percent` / `BOSS=name,>percent` (same, but only while the bar is strictly below/above that HP percent — phase themes, e.g. `BOSS=wither,<50`). Any number 0–100, decimals allowed (`<12.5`). The `<`/`>` sign is required (`BOSS=wither,50` is a pack error). With several same-named bars the lowest HP counts. Numbers outside 0–100 parse but are meaningless (`<150` is always true).
+- `BOSS=name,below=<percent>` / `BOSS=name,above=<percent>` (same, but only while the bar is below/above that HP percent — phase themes, e.g. `BOSS=wither,below=50`). Any number 0–100, decimals allowed (`below=12.5`). Combine both for a band (`below=50,above=20` = between 20% and 50%). With several same-named bars the lowest HP counts. Numbers outside 0–100 parse but are meaningless (`below=150` is always true).
 
 ```
   # wither second phase theme, takes over when the bar drops below half
-  - events: [ "BOSS=wither,<50" ]
+  - events: [ "BOSS=wither,below=50" ]
     forceStopMusicOnChanged: true
     forceStartMusicOnValid: true
     songs:
@@ -359,20 +359,37 @@ NOTE: structure data is never sent to the client by vanilla, the mod reads it fr
 
 ## Entity Events
 
-Entities can be specified by doing `ENTITY=typename`, with optional radius and minimum count: `ENTITY=zombie`, `ENTITY=zombie,32`, `ENTITY=zombie,32,3`. The type is matched as a substring of the entity id, so modded mobs work too. Radius defaults to 32 (max 64), count defaults to 1.
+Entities can be specified by doing `ENTITY=typename`. The type is matched as a substring of the entity id, so modded mobs work too.
+
+Optional parameters are named, so the order doesn't matter and you only write what you need:
+
+| Parameter | Meaning | Default |
+|---|---|---|
+| `r=<radius>` | how close the mob has to be (3D distance in blocks, max 64) | 32 |
+| `c=<count>` | how many matching mobs are needed | 1 |
+| `target=me` / `target=other` | who the mob is targeting | any |
 
 ```
   # raid music when 3+ pillagers within 48 blocks
-  - events: [ "ENTITY=pillager,48,3" ]
+  - events: [ "ENTITY=pillager,r=48,c=3" ]
     forceStopMusicOnChanged: true
     songs:
       - "LastStand"
 
   # ender dragon from far away (uses 3D distance)
-  - events: [ "ENTITY=ender_dragon,64" ]
+  - events: [ "ENTITY=ender_dragon,r=64" ]
+    songs:
+      - "Ruthless"
+
+  # only when the zombies are actually after you
+  - events: [ "ENTITY=zombie,target=me" ]
     songs:
       - "Ruthless"
 ```
+
+Positional values are not accepted here (`ENTITY=zombie,32` is an error, use `r=32`) — this condition is new, so there is nothing to stay compatible with.
+
+`target=me` / `target=other` check what the mob is aiming at. Vanilla never sends mob targets to the client, so this is read from the integrated server and is exact in singleplayer (and on a LAN host). On a dedicated server the mod has to guess: a mob that recently hit you counts as targeting you, a mob that is fighting something else counts as targeting someone else — so treat it as a hint there, not a fact.
 
 Find entity ids with the vanilla command `/summon ` (autocomplete lists everything, including modded ones).
 
@@ -388,8 +405,10 @@ Use `/reactivemusic logBlockCounter` to print the nearby block counts to get an 
 Fortress detection example:
 ```
 # 1000 nether bricks and 2 brick fences within 25 blocks
-[ "DIM=NETHER", "BLOCK=nether_bricks,1000", "BLOCK=nether_brick_fence,2" ]
+[ "DIM=NETHER", "BLOCK=nether_bricks,c=1000", "BLOCK=nether_brick_fence,c=2" ]
 ```
+
+The plain form `BLOCK=nether_bricks,1000` still works, `c=` is just the explicit version.
 
 
 <br><br>
@@ -433,6 +452,19 @@ Example:
 		"partial-event-name"
 	],
 ```
+
+## Block counter blacklist
+
+`BLOCK=` conditions count blocks around you. If some blocks are noise for your songpack (ores, debris), exclude them by id substring in `config/ReactiveMusic.json5`:
+
+```
+	blockCounterBlacklist: [
+		"ore",
+		"debris"
+	],
+```
+
+Empty by default, so every block is counted.
 
 ## Dynamic FPS compatibility
 

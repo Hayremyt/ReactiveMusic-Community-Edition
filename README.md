@@ -9,8 +9,8 @@ Reactive Music trades Minecraft's default music for something dynamic, reactive,
 
 **New triggers** (see `docs/MAKING_SONGPACKS.md` for the full reference):
 - `STRUCT=` / `STRUCTURE=` — music inside structures (singleplayer)
-- `ENTITY=type[,radius][,count]` — specific mobs, e.g. `ENTITY=pillager,48,3`
-- `BOSS=name` — per-boss themes matched against the boss bar title
+- `ENTITY=type,r=<radius>,c=<count>,target=me|other` — specific mobs, e.g. `ENTITY=pillager,r=48,c=3`
+- `BOSS=name` (+ `below=`/`above=` HP percent) — per-boss themes matched against the boss bar title
 - `COMBAT` — real back-and-forth fights (hit trading + danger gating, no trigger on passive mobs or item frames)
 - `BATTLE`, `WARDEN`, `WITHER`, `DRAGON` — outnumbered detector and boss mobs without bars
 - `NETHER_FORTRESS`, `BASTION`, `END_CITY`, `OCEAN_TEMPLE`, `FARM`, `RAID` — structure tags from nearby mobs
