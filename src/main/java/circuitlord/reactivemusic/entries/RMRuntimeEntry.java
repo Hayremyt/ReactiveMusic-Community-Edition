@@ -107,12 +107,27 @@ public class RMRuntimeEntry {
                     String blockData = eventSection.substring(6);
                     String[] parts = blockData.split(",");
 
-                    // make sure it's a number, dunno why this is the syntax for that
-                    if (parts.length >= 2 && parts[1].matches("\\d+")) {
-
+                    // name, optionally followed by the amount: BLOCK=nether_bricks,1000 or BLOCK=nether_bricks,c=1000
+                    if (parts.length >= 1 && !parts[0].isEmpty()) {
                         RMEntryBlockCondition blockCond = new RMEntryBlockCondition();
                         blockCond.block = parts[0];
-                        blockCond.requiredCount = Integer.parseInt(parts[1]);
+                        blockCond.requiredCount = 1;
+
+                        if (parts.length >= 2 && !parts[1].isEmpty()) {
+                            String amount = parts[1].trim();
+                            String lower = amount.toLowerCase(java.util.Locale.ROOT);
+
+                            if (lower.startsWith("c=") || lower.startsWith("count=")) {
+                                amount = amount.substring(amount.indexOf('=') + 1).trim();
+                            }
+
+                            if (!amount.matches("\\d+")) {
+                                Entry.errorString += "Invalid syntax: " + eventSection + "!\n\n";
+                                continue;
+                            }
+
+                            blockCond.requiredCount = Integer.parseInt(amount);
+                        }
 
                         if (negated) condition.negBlocks.add(blockCond);
                         else condition.blocks.add(blockCond);
@@ -190,21 +205,71 @@ public class RMRuntimeEntry {
                     eventHasData = true;
                 }
 
-                // entities, ENTITY=zombie or ENTITY=zombie,32 or ENTITY=zombie,32,3 (type, radius, min count)
-                else if (eventSection.startsWith("entity=")) {                    String entityData = eventSection.substring(7);
+                // entities, named parameters only: ENTITY=zombie,r=32,c=3,target=me
+                // (this condition is new, so there is no legacy positional syntax to keep)
+                else if (eventSection.startsWith("entity=")) {
+                    String entityData = eventSection.substring(7);
                     String[] parts = entityData.split(",");
 
                     if (parts.length >= 1 && !parts[0].isEmpty()) {
                         RMEntryEntityCondition entityCond = new RMEntryEntityCondition();
                         entityCond.entity = parts[0];
 
-                        if (parts.length >= 2 && parts[1].matches("\\d+")) {
-                            entityCond.radius = Math.min(Integer.parseInt(parts[1]), SongPicker.ENTITY_SCAN_RADIUS);
+                        boolean invalid = false;
+
+                        for (int i = 1; i < parts.length; i++) {
+                            String part = parts[i].trim();
+                            if (part.isEmpty()) continue;
+
+                            String lower = part.toLowerCase(java.util.Locale.ROOT);
+                            int eq = lower.indexOf('=');
+
+                            if (eq <= 0) {
+                                Entry.errorString += "Invalid entity condition: " + eventSection + "! (use named parameters, e.g. r=32, c=3)\n\n";
+                                invalid = true;
+                                break;
+                            }
+
+                            String key = lower.substring(0, eq).trim();
+                            String value = lower.substring(eq + 1).trim();
+
+                            if (key.equals("r") || key.equals("radius")) {
+                                if (!value.matches("\\d+")) {
+                                    Entry.errorString += "Invalid entity condition: " + eventSection + " (bad radius \"" + value + "\")!\n\n";
+                                    invalid = true;
+                                    break;
+                                }
+                                entityCond.radius = Math.min(Integer.parseInt(value), SongPicker.ENTITY_SCAN_RADIUS);
+                                continue;
+                            }
+
+                            if (key.equals("c") || key.equals("count")) {
+                                if (!value.matches("\\d+")) {
+                                    Entry.errorString += "Invalid entity condition: " + eventSection + " (bad count \"" + value + "\")!\n\n";
+                                    invalid = true;
+                                    break;
+                                }
+                                entityCond.minCount = Math.max(1, Integer.parseInt(value));
+                                continue;
+                            }
+
+                            if (key.equals("target")) {
+                                RMEntityTargetMode mode = RMEntityTargetMode.parse(value);
+                                if (mode == null) {
+                                    Entry.errorString += "Invalid entity condition: " + eventSection + " (bad target \"" + value + "\", use me/other)!\n\n";
+                                    invalid = true;
+                                    break;
+                                }
+                                entityCond.targetMode = mode;
+                                continue;
+                            }
+
+                            Entry.errorString += "Invalid entity condition: " + eventSection + " (unknown parameter \"" + key + "\")!\n\n";
+                            invalid = true;
+                            break;
                         }
 
-                        if (parts.length >= 3 && parts[2].matches("\\d+")) {
-                            entityCond.minCount = Math.max(1, Integer.parseInt(parts[2]));
-                        }
+                        if (invalid) continue;
 
                         if (negated) condition.negEntityTypes.add(entityCond);
                         else condition.entityTypes.add(entityCond);
@@ -217,7 +282,7 @@ public class RMRuntimeEntry {
                 }
 
                 // specific bosses by boss bar title substring, BOSS=wither (bare BOSS still means any boss bar)
-                // optional HP phase: BOSS=wither,<50 (bar below 50%), BOSS=wither,>80
+                // optional HP phase with named parameters: BOSS=wither,below=50 / BOSS=wither,above=80
                 else if (eventSection.startsWith("boss=")) {
                     String bossData = eventSection.substring(5);
                     String[] parts = bossData.split(",");
@@ -226,18 +291,46 @@ public class RMRuntimeEntry {
                         RMEntryBossCondition bossCond = new RMEntryBossCondition();
                         bossCond.name = parts[0];
 
-                        if (parts.length >= 2 && !parts[1].isEmpty()) {
-                            String percent = parts[1];
-                            if ((percent.startsWith("<") || percent.startsWith(">")) && percent.substring(1).matches("\\d+(\\.\\d+)?")) {
-                                float value = Float.parseFloat(percent.substring(1));
-                                if (percent.startsWith("<")) bossCond.belowPercent = value;
-                                else bossCond.abovePercent = value;
+                        boolean invalid = false;
+
+                        for (int i = 1; i < parts.length; i++) {
+                            String part = parts[i].trim();
+                            if (part.isEmpty()) continue;
+
+                            int eq = part.indexOf('=');
+                            if (eq <= 0) {
+                                Entry.errorString += "Invalid boss condition: " + eventSection + "! (use named parameters, e.g. below=50)\n\n";
+                                invalid = true;
+                                break;
                             }
-                            else {
-                                Entry.errorString += "Invalid boss percent: " + eventSection + "! Use <50 or >80.\n\n";
+
+                            String key = part.substring(0, eq).trim().toLowerCase(java.util.Locale.ROOT);
+                            String value = part.substring(eq + 1).trim();
+
+                            if (!value.matches("\\d+(\\.\\d+)?")) {
+                                Entry.errorString += "Invalid boss condition: " + eventSection + " (bad value \"" + value + "\")!\n\n";
+                                invalid = true;
+                                break;
+                            }
+
+                            float percent = Float.parseFloat(value);
+
+                            if (key.equals("below") || key.equals("hp-below")) {
+                                bossCond.belowPercent = percent;
                                 continue;
                             }
+
+                            if (key.equals("above") || key.equals("hp-above")) {
+                                bossCond.abovePercent = percent;
+                                continue;
+                            }
+
+                            Entry.errorString += "Invalid boss condition: " + eventSection + " (unknown parameter \"" + key + "\")!\n\n";
+                            invalid = true;
+                            break;
                         }
+
+                        if (invalid) continue;
 
                         if (negated) condition.negBossTypes.add(bossCond);
                         else condition.bossTypes.add(bossCond);
