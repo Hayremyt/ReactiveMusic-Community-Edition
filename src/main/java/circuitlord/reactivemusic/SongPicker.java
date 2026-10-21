@@ -5,6 +5,7 @@ import circuitlord.reactivemusic.config.ModConfig;
 import circuitlord.reactivemusic.entries.RMEntryBlockCondition;
 import circuitlord.reactivemusic.entries.RMEntryBossCondition;
 import circuitlord.reactivemusic.entries.RMEntryEntityCondition;
+import circuitlord.reactivemusic.entries.RMEntityTargetMode;
 import circuitlord.reactivemusic.entries.RMRuntimeEntry;
 import circuitlord.reactivemusic.mixin.BossBarHudAccessor;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
@@ -15,6 +16,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 
 import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.passive.HorseEntity;
 import net.minecraft.entity.passive.PigEntity;
 import net.minecraft.entity.passive.VillagerEntity;
@@ -38,6 +40,7 @@ import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
 
 import java.util.*;
+import java.lang.reflect.Method;
 
 public final class SongPicker {
 
@@ -744,21 +747,130 @@ public final class SongPicker {
         return false;
     }
 
-    static boolean anyEntityMatches(List<RMEntryEntityCondition> conds) {        for (var cond : conds) {
+    static boolean anyEntityMatches(List<RMEntryEntityCondition> conds) {
+        for (var cond : conds) {
             int count = 0;
-            double r2 = (double) cond.radius * cond.radius;
+            int radius = cond.radius;
+            int minCount = cond.minCount;
+            double r2 = (double) radius * radius;
             for (int i = 0; i < nearbyEntities.size(); i++) {
                 if (!nearbyEntityIds.get(i).contains(cond.entity)) continue;
                 var e = nearbyEntities.get(i);
                 double dx = e.getX() - entityScanCenter.getX();
                 double dy = e.getY() - entityScanCenter.getY();
                 double dz = e.getZ() - entityScanCenter.getZ();
-                if (dx * dx + dy * dy + dz * dz <= r2 && ++count >= cond.minCount) {
+                if (dx * dx + dy * dy + dz * dz > r2) continue;
+                if (!entityTargetMatches(e, cond.targetMode)) continue;
+                if (++count >= minCount) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    /**
+     * Checks the mob's target against the requested mode.
+     * <p>
+     * Vanilla never sends mob targets to the client, so in singleplayer (or on a LAN host) we read the
+     * real target from the integrated server. On dedicated servers that is impossible, so we fall back
+     * to a heuristic: a mob that recently damaged us is engaged with us, a mob that is attacking
+     * something else is not looking at us.
+     */
+    static boolean entityTargetMatches(Entity clientEntity, RMEntityTargetMode mode) {
+        if (mode == RMEntityTargetMode.ANY) return true;
+
+        Integer exact = serverSideTargetIsPlayer(clientEntity);
+        if (exact != null) {
+            if (mode == RMEntityTargetMode.TARGET_ME) return exact == 1;
+            return exact == 0;
+        }
+
+        return heuristicTargetMatches(clientEntity, mode);
+    }
+
+    /**
+     * 1 = the mob targets the player, 0 = the mob targets someone else, null = unknown (no server side).
+     */
+    private static Integer serverSideTargetIsPlayer(Entity clientEntity) {
+        try {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc == null || mc.getServer() == null || mc.player == null) return null;
+
+            var serverWorld = mc.getServer().getWorld(clientEntity.getEntityWorld().getRegistryKey());
+            if (serverWorld == null) return null;
+
+            var serverEntity = serverWorld.getEntityById(clientEntity.getId());
+            if (!(serverEntity instanceof MobEntity mob)) return null;
+
+            var target = getMobTarget(mob);
+            if (target == null) return 0;
+
+            return target.getUuid().equals(mc.player.getUuid()) ? 1 : 0;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * The mob's target. Since 1.21 most mobs run on the brain system and keep their target in
+     * brain memory instead of the classic field, so both are checked.
+     */
+    private static net.minecraft.entity.LivingEntity getMobTarget(MobEntity mob) {
+        var target = mob.getTarget();
+        if (target != null) return target;
+
+        try {
+            Method getBrain = mob.getClass().getMethod("getBrain");
+            Object brain = getBrain.invoke(mob);
+            if (brain == null) return null;
+
+            Class<?> memoryTypeClass = Class.forName("net.minecraft.entity.ai.memory.MemoryModuleType");
+            Object attackTarget = memoryTypeClass.getField("ATTACK_TARGET").get(null);
+
+            Method getMemory = brain.getClass().getMethod("getMemory", memoryTypeClass);
+            Object optional = getMemory.invoke(brain, attackTarget);
+            if (optional instanceof java.util.Optional<?> opt && opt.isPresent()) {
+                Object value = opt.get();
+                if (value instanceof net.minecraft.entity.LivingEntity living) return living;
+            }
+        } catch (Throwable ignored) {
+            // older versions have no brain system
+        }
+
+        return null;
+    }
+
+    /** Multiplayer fallback, no target data available. */
+    private static boolean heuristicTargetMatches(Entity clientEntity, RMEntityTargetMode mode) {
+        boolean hitUsRecently = recentEntityDamageSources.containsKey(clientEntity);
+        boolean attacking = clientEntity instanceof MobEntity mob && mob.isAttacking();
+        boolean facingUs = isFacingPlayer(clientEntity);
+
+        if (mode == RMEntityTargetMode.TARGET_ME) {
+            return hitUsRecently || (attacking && facingUs);
+        }
+
+        return attacking && !hitUsRecently && !facingUs;
+    }
+
+    /** Rough "is this mob looking at the player" check, entity rotation is synced to clients. */
+    private static boolean isFacingPlayer(Entity entity) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.player == null) return false;
+
+        double dx = mc.player.getX() - entity.getX();
+        double dz = mc.player.getZ() - entity.getZ();
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        if (distance < 0.001) return true;
+        if (distance > 16) return false;
+
+        // dot product of the mob's look vector with the direction to the player
+        double lookX = -Math.sin(Math.toRadians(entity.getYaw()));
+        double lookZ = Math.cos(Math.toRadians(entity.getYaw()));
+        double dot = (lookX * dx + lookZ * dz) / distance;
+
+        return dot > 0.9;
     }
 
     static boolean anyBossMatches(List<RMEntryBossCondition> conds) {
