@@ -234,13 +234,9 @@ public class RMRuntimeEntry {
                             String value = lower.substring(eq + 1).trim();
 
                             if (key.equals("r") || key.equals("radius")) {
-                                if (!value.matches("\\d+")) {
-                                    Entry.errorString += "Invalid entity condition: " + eventSection + " (bad radius \"" + value + "\")!\n\n";
-                                    invalid = true;
-                                    break;
-                                }
-                                entityCond.radius = Math.min(Integer.parseInt(value), SongPicker.ENTITY_SCAN_RADIUS);
-                                continue;
+                                Entry.errorString += "Invalid entity condition: " + eventSection + " (r= is gone, use below=/above= for distance)!\n\n";
+                                invalid = true;
+                                break;
                             }
 
                             if (key.equals("c") || key.equals("count")) {
@@ -261,6 +257,19 @@ public class RMRuntimeEntry {
                                     break;
                                 }
                                 entityCond.targetMode = mode;
+                                continue;
+                            }
+
+                            // distance bounds in blocks, same wording as the boss HP bounds
+                            if (key.equals("below") || key.equals("above")) {
+                                if (!value.matches("\\d+(\\.\\d+)?")) {
+                                    Entry.errorString += "Invalid entity condition: " + eventSection + " (bad distance \"" + value + "\")!\n\n";
+                                    invalid = true;
+                                    break;
+                                }
+                                float distance = Float.parseFloat(value);
+                                if (key.equals("below")) entityCond.belowDistance = distance;
+                                else entityCond.aboveDistance = distance;
                                 continue;
                             }
 
