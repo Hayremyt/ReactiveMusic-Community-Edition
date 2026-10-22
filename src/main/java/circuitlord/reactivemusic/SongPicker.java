@@ -750,16 +750,22 @@ public final class SongPicker {
     static boolean anyEntityMatches(List<RMEntryEntityCondition> conds) {
         for (var cond : conds) {
             int count = 0;
-            int radius = cond.radius;
             int minCount = cond.minCount;
-            double r2 = (double) radius * radius;
+            // the scan itself only covers ENTITY_SCAN_RADIUS blocks, tighter bounds come from below=/above=
+            double r2 = (double) ENTITY_SCAN_RADIUS * ENTITY_SCAN_RADIUS;
+            double below2 = cond.belowDistance == null ? -1 : (double) cond.belowDistance * cond.belowDistance;
+            double above2 = cond.aboveDistance == null ? -1 : (double) cond.aboveDistance * cond.aboveDistance;
             for (int i = 0; i < nearbyEntities.size(); i++) {
                 if (!nearbyEntityIds.get(i).contains(cond.entity)) continue;
                 var e = nearbyEntities.get(i);
                 double dx = e.getX() - entityScanCenter.getX();
                 double dy = e.getY() - entityScanCenter.getY();
                 double dz = e.getZ() - entityScanCenter.getZ();
-                if (dx * dx + dy * dy + dz * dz > r2) continue;
+                double distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq > r2) continue;
+                // distance band, inclusive: below N = N or closer, above N = N or farther
+                if (below2 >= 0 && distSq > below2) continue;
+                if (above2 >= 0 && distSq < above2) continue;
                 if (!entityTargetMatches(e, cond.targetMode)) continue;
                 if (++count >= minCount) {
                     return true;
@@ -880,8 +886,9 @@ public final class SongPicker {
                 Float percent = currentBossPercents.get(current);
                 if (percent == null) continue;
                 float hp = percent * 100f;
-                if (cond.belowPercent != null && !(hp < cond.belowPercent)) continue;
-                if (cond.abovePercent != null && !(hp > cond.abovePercent)) continue;
+                // inclusive bounds, same as the entity distance band
+                if (cond.belowPercent != null && hp > cond.belowPercent) continue;
+                if (cond.abovePercent != null && hp < cond.abovePercent) continue;
                 return true;
             }
         }
