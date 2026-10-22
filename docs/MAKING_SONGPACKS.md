@@ -251,7 +251,7 @@ All available event types. Remember: within one entry, different events mean AND
 ### Combat
 - `BOSS` (whenever a boss bar is on-screen)
 - `BOSS=name` (boss bar title contains `name`, e.g. `BOSS=wither`, `BOSS=dragon` — case-insensitive, spaces don't matter, any HP)
-- `BOSS=name,below=<percent>` / `BOSS=name,above=<percent>` (same, but only while the bar is below/above that HP percent — phase themes, e.g. `BOSS=wither,below=50`). Any number 0–100, decimals allowed (`below=12.5`). Combine both for a band (`below=50,above=20` = between 20% and 50%). With several same-named bars the lowest HP counts. Numbers outside 0–100 parse but are meaningless (`below=150` is always true).
+- `BOSS=name,below=<percent>` / `BOSS=name,above=<percent>` (same, but only while the bar is below/above that HP percent — phase themes, e.g. `BOSS=wither,below=50`). Any number 0–100, decimals allowed (`below=12.5`). **Bounds are inclusive** (`below=50` matches a bar sitting at exactly 50%), same as the entity distance band. Combine both for a band (`below=50,above=20` = between 20% and 50%). With several same-named bars the lowest HP counts. Numbers outside 0–100 parse but are meaningless (`below=150` is always true).
 
 ```
   # wither second phase theme, takes over when the bar drops below half
@@ -365,19 +365,28 @@ Optional parameters are named, so the order doesn't matter and you only write wh
 
 | Parameter | Meaning | Default |
 |---|---|---|
-| `r=<radius>` | how close the mob has to be (3D distance in blocks, max 64) | 32 |
 | `c=<count>` | how many matching mobs are needed | 1 |
+| `below=<blocks>` | only mobs **closer** than this | unbounded |
+| `above=<blocks>` | only mobs **farther** than this | unbounded |
 | `target=me` / `target=other` | who the mob is targeting | any |
+
+`below`/`above` are **distances in blocks** (unlike `BOSS=`, where the same words mean HP percent — the meaning follows what is being measured). **Both ends are inclusive**: `below=40` still matches a mob standing exactly 40 blocks away, `above=20` still matches one exactly 20 blocks away, so `above=20,below=40` covers the whole 20–40 band including its edges. The scan itself covers 64 blocks, so bounds beyond that see nothing.
 
 ```
   # raid music when 3+ pillagers within 48 blocks
-  - events: [ "ENTITY=pillager,r=48,c=3" ]
+  - events: [ "ENTITY=pillager,below=48,c=3" ]
     forceStopMusicOnChanged: true
     songs:
       - "LastStand"
 
-  # ender dragon from far away (uses 3D distance)
-  - events: [ "ENTITY=ender_dragon,r=64" ]
+  # a horde closing in: 4+ zombies between 20 and 40 blocks
+  - events: [ "ENTITY=zombie,above=20,below=40,c=4" ]
+    forceStopMusicOnChanged: true
+    songs:
+      - "LastStand"
+
+  # ender dragon nearby (3D distance)
+  - events: [ "ENTITY=ender_dragon,below=64" ]
     songs:
       - "Ruthless"
 
@@ -387,7 +396,7 @@ Optional parameters are named, so the order doesn't matter and you only write wh
       - "Ruthless"
 ```
 
-Positional values are not accepted here (`ENTITY=zombie,32` is an error, use `r=32`) — this condition is new, so there is nothing to stay compatible with.
+Positional values are not accepted here (`ENTITY=zombie,32` is an error) — this condition is new, so there is nothing to stay compatible with.
 
 `target=me` / `target=other` check what the mob is aiming at. Vanilla never sends mob targets to the client, so this is read from the integrated server and is exact in singleplayer (and on a LAN host). On a dedicated server the mod has to guess: a mob that recently hit you counts as targeting you, a mob that is fighting something else counts as targeting someone else — so treat it as a hint there, not a fact.
 
