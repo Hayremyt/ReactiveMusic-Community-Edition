@@ -305,7 +305,7 @@ You can search for any biome by using `BIOME=biomename`. This can be the full bi
 
 <br><br>
 
-Biome tags can be used by specifying `BIOMETAG=BIOME_TAG`. They're good for automatically having compatibility with modded biomes. You can find the full list of tags [here](https://maven.fabricmc.net/docs/fabric-api-0.100.3+1.21/net/fabricmc/fabric/api/tag/convention/v2/ConventionalBiomeTags.html)
+Biome tags can be used by specifying `BIOMETAG=BIOME_TAG`. They're good for automatically having compatibility with modded biomes. The full list of conventional tags with their contents is in the [Fabric API javadoc](https://maven.fabricmc.net/docs/fabric-api-0.141.3+1.21.11/net/fabricmc/fabric/api/tag/convention/v2/ConventionalBiomeTags.html) (swap the version in the URL for the one you play).
 
 NOTE: putting the "IS_" in front of the tag is optional ("BIOMETAG=IS_MOUNTAIN" and "BIOMETAG=MOUNTAIN" are both valid
 
