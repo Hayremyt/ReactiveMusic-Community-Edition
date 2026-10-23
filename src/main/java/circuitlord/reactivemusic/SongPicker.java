@@ -89,6 +89,7 @@ public final class SongPicker {
     public static BlockPos cachedBlockCounterOrigin;
     // starts outside the scan range, so the first tick wraps around to -BLOCK_SCAN_RADIUS
     public static int currentBlockCounterX = BLOCK_SCAN_RADIUS + 1;
+    private static World lastBlockScanWorld = null;
 
     public static Object2IntOpenHashMap<String> blockCounterMap = new Object2IntOpenHashMap<>();
     public static Object2IntOpenHashMap<String> cachedBlockChecker = new Object2IntOpenHashMap<>();
@@ -465,6 +466,15 @@ public final class SongPicker {
         World world = mc.world;
         if (player == null || world == null)
             return;
+
+        // a fresh world (new game, rejoin, dimension change) invalidates the previous snapshot
+        if (world != lastBlockScanWorld) {
+            lastBlockScanWorld = world;
+            blockCounterMap.clear();
+            cachedBlockChecker.clear();
+            cachedBlockCounterOrigin = null;
+            currentBlockCounterX = BLOCK_SCAN_RADIUS + 1;
+        }
 
         // advance one column of the cube per tick
         currentBlockCounterX++;
