@@ -319,8 +319,9 @@ public final class SongPicker {
 
         {
             // one shared scan for all ENTITY= conditions, individual radii/counts filter below
+            // the box uses the same radius on Y so the spherical 64-block check is the only real limit
             List<Entity> found = world.getEntitiesByClass(Entity.class,
-                    GetBoxAroundPlayer(player, ENTITY_SCAN_RADIUS, 32.f),
+                    GetBoxAroundPlayer(player, ENTITY_SCAN_RADIUS, (float) ENTITY_SCAN_RADIUS),
                     entity -> entity != null && entity.isAlive() && entity != player);
 
             nearbyEntities = found;
