@@ -398,7 +398,19 @@ Optional parameters are named, so the order doesn't matter and you only write wh
 
 Positional values are not accepted here (`ENTITY=zombie,32` is an error) — this condition is new, so there is nothing to stay compatible with.
 
-`target=me` / `target=other` check what the mob is aiming at. Vanilla never sends mob targets to the client, so this is read from the integrated server and is exact in singleplayer (and on a LAN host). On a dedicated server the mod has to guess: a mob that recently hit you counts as targeting you, a mob that is fighting something else counts as targeting someone else — so treat it as a hint there, not a fact.
+`target=me` / `target=other` check what the mob is aiming at. Vanilla never syncs mob targets to the client, so there are two separate paths:
+
+1. **Integrated server available** (singleplayer, or the host of a LAN world) — the mod reads the real mob target from the server world. The result is **exact at any distance**: a warden hunting you from 40 blocks away is detected correctly, even while you dodge its attacks.
+2. **No integrated server** (vanilla multiplayer / dedicated server) — the mod falls back to a pure-client heuristic built only from state the server syncs to clients:
+   - the mob recently damaged you (melee, or the archer behind an arrow),
+   - the mob is an angry warden (its anger level is synced),
+   - the mob is actively aggressive **and** looking at you **and** moving towards you **and** has line of sight **and** you are the closest player.
+
+   This is a hint, not a fact. A distant skeleton shooting from behind cover, or a mob that is chasing you but standing still behind a wall, can be missed.
+
+`target=other` means the mob is aggressive, but does not look at you and has not hit you recently.
+
+**Note on boundaries:** once an `ENTITY=` condition matches, it stays true for another 2 seconds after the mobs stop matching. A mob pacing across the `below=`/`above=` edge therefore cannot make the music flip back and forth.
 
 Find entity ids with the vanilla command `/summon ` (autocomplete lists everything, including modded ones).
 
