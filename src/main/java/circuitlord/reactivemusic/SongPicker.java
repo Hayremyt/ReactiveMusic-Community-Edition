@@ -14,9 +14,12 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.CreditsScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.entity.player.PlayerEntity;
 
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.mob.WardenEntity;
 import net.minecraft.entity.passive.HorseEntity;
 import net.minecraft.entity.passive.PigEntity;
 import net.minecraft.entity.passive.VillagerEntity;
@@ -33,9 +36,11 @@ import net.minecraft.util.registry.Registry;
 //?}
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
 
@@ -62,6 +67,8 @@ public final class SongPicker {
     private static final List<Long> recentCombatHits = new ArrayList<>();
     private static long lastDamageTakenTime = NEVER_HAPPENED;
     private static long lastHeavyHitTime = NEVER_HAPPENED;
+    /** Последнее известное здоровье игрока — для клиентского детекта урона на dédi сервере. */
+    private static float lastPlayerHealth = -1.0f;
 
     public static void registerCombatHit() {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -105,9 +112,25 @@ public final class SongPicker {
     public static Map<String, Float> currentBossPercents = new HashMap<>();
 
     public static final int ENTITY_SCAN_RADIUS = 64;
+    /**
+     * How long an ENTITY= condition stays true after it last matched, in ticks (1s = 20).
+     * Without this a mob pacing on a below=/above= boundary flips the condition every tick.
+     */
+    public static final long ENTITY_CONDITION_GRACE_TICKS = 40L;
+
+    /** Cosine threshold for "the mob is looking at us"; 0.8 is roughly a 37 degree cone. */
+    private static final double TARGET_FACING_DOT = 0.8;
+    /** Only trust the look/approach test at close range, further out it gets unreliable. */
+    private static final double TARGET_FACING_RANGE = 24.0;
+    /** Warden anger value at which it starts actively hunting (vanilla: 80 = agitated). */
+    private static final int WARDEN_HUNTING_ANGER = 80;
     public static List<Entity> nearbyEntities = new ArrayList<>();
     public static List<String> nearbyEntityIds = new ArrayList<>();
     public static BlockPos entityScanCenter = BlockPos.ORIGIN;
+    /** World tick of the last entity scan, the grace window is measured against it. */
+    public static long entityScanCenterTick = 0L;
+    /** World time, refreshed once per client tick; all debounce windows measure against it. */
+    public static long currentWorldTick = 0L;
 
 
     private static final Random rand = new Random();
@@ -278,11 +301,17 @@ public final class SongPicker {
         // remove past sources
         recentEntityDamageSources.entrySet().removeIf(entry -> entry.getKey() == null || !entry.getKey().isAlive() || world.getTime() - entry.getValue() > TIME_FOR_FORGET_DAMAGE_SOURCE);
 
-        // add new damage sources
+        // add new damage sources — prefer the real attacker (e.g. skeleton) over the projectile (arrow)
         var recentDamage = player.getRecentDamageSource();
 
-        if (recentDamage != null && recentDamage.getSource() != null) {
-            recentEntityDamageSources.put(recentDamage.getSource(), world.getTime());
+        if (recentDamage != null) {
+            Entity attacker = recentDamage.getAttacker();
+            if (attacker == null) {
+                attacker = recentDamage.getSource();
+            }
+            if (attacker != null) {
+                recentEntityDamageSources.put(attacker, world.getTime());
+            }
         }
 
 
@@ -328,6 +357,7 @@ public final class SongPicker {
             nearbyEntities = found;
             nearbyEntityIds = new ArrayList<>(found.size());
             entityScanCenter = playerPos;
+            entityScanCenterTick = world.getTime();
 
             for (var e : found) {
                 //? if >=1.20 {
@@ -467,6 +497,14 @@ public final class SongPicker {
         if (player == null || world == null)
             return;
 
+        // client-side damage detection: if health dropped this tick, we took damage
+        // (works on dedicated servers where PlayerEntity.damage() mixin may not fire)
+        float currentHealth = player.getHealth();
+        if (lastPlayerHealth >= 0.0f && currentHealth < lastPlayerHealth) {
+            registerDamageTaken(lastPlayerHealth - currentHealth);
+        }
+        lastPlayerHealth = currentHealth;
+
         // a fresh world (new game, rejoin, dimension change) invalidates the previous snapshot
         if (world != lastBlockScanWorld) {
             lastBlockScanWorld = world;
@@ -474,6 +512,7 @@ public final class SongPicker {
             cachedBlockChecker.clear();
             cachedBlockCounterOrigin = null;
             currentBlockCounterX = BLOCK_SCAN_RADIUS + 1;
+            lastPlayerHealth = -1.0f; // reset health baseline on world change
         }
 
         // advance one column of the cube per tick
@@ -760,6 +799,38 @@ public final class SongPicker {
 
     static boolean anyEntityMatches(List<RMEntryEntityCondition> conds) {
         for (var cond : conds) {
+            if (anySingleEntityConditionMatches(cond)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean anySingleEntityConditionMatches(RMEntryEntityCondition cond) {
+        boolean matched = scanEntityCondition(cond);
+        long now = entityScanCenterTick;
+
+        if (matched) {
+            // remember when it last held, the grace window below keys off this
+            cond.lastMatchTick = now;
+            return true;
+        }
+
+        // world time can jump backwards (leaving to the menu, changing worlds), drop the stale state
+        if (cond.lastMatchTick > now) {
+            cond.lastMatchTick = Long.MIN_VALUE;
+            return false;
+        }
+
+        // Hysteresis: a mob walking across the below=/above= boundary would otherwise toggle the
+        // condition every tick and make the music flap. Once the condition matched, keep it true for
+        // ENTITY_CONDITION_GRACE_TICKS more, so crossing the edge has to be real and sustained.
+        return cond.lastMatchTick != Long.MIN_VALUE
+                && now - cond.lastMatchTick <= ENTITY_CONDITION_GRACE_TICKS;
+    }
+
+    private static boolean scanEntityCondition(RMEntryEntityCondition cond) {
+        {
             int count = 0;
             int minCount = cond.minCount;
             // the scan itself only covers ENTITY_SCAN_RADIUS blocks, tighter bounds come from below=/above=
@@ -789,25 +860,33 @@ public final class SongPicker {
     /**
      * Checks the mob's target against the requested mode.
      * <p>
-     * Vanilla never sends mob targets to the client, so in singleplayer (or on a LAN host) we read the
-     * real target from the integrated server. On dedicated servers that is impossible, so we fall back
-     * to a heuristic: a mob that recently damaged us is engaged with us, a mob that is attacking
-     * something else is not looking at us.
+     * Two clearly separated paths:
+     * <ol>
+     *   <li><b>Integrated server available</b> (singleplayer / LAN host): the real mob target is read
+     *       from the server world, so the result is exact at any distance — a warden hunting you from
+     *       40 blocks away is detected correctly.</li>
+     *   <li><b>No integrated server</b> (vanilla multiplayer / dedicated server): the server never
+     *       sends mob targets, so we fall back to a pure-client heuristic built from synced state
+     *       only — contact damage, aggression flag, warden anger, and geometry.</li>
+     * </ol>
      */
     static boolean entityTargetMatches(Entity clientEntity, RMEntityTargetMode mode) {
         if (mode == RMEntityTargetMode.ANY) return true;
 
+        // ---- path 1: exact, needs an integrated server ----
         Integer exact = serverSideTargetIsPlayer(clientEntity);
         if (exact != null) {
             if (mode == RMEntityTargetMode.TARGET_ME) return exact == 1;
             return exact == 0;
         }
 
+        // ---- path 2: pure client, no server side at all ----
         return heuristicTargetMatches(clientEntity, mode);
     }
 
     /**
      * 1 = the mob targets the player, 0 = the mob targets someone else, null = unknown (no server side).
+     * Only non-null when an integrated server is reachable.
      */
     private static Integer serverSideTargetIsPlayer(Entity clientEntity) {
         try {
@@ -858,21 +937,47 @@ public final class SongPicker {
         return null;
     }
 
-    /** Multiplayer fallback, no target data available. */
+    /**
+     * Pure-client target heuristic. Runs when no integrated server exists (vanilla multiplayer,
+     * dedicated server) and uses only state the server actually syncs to clients:
+     * contact damage, the mob's aggression flag, warden anger, and geometry.
+     */
     private static boolean heuristicTargetMatches(Entity clientEntity, RMEntityTargetMode mode) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.player == null) return false;
+
+        // A creative / spectator player is never a mob target in vanilla — never count as "me".
+        if (mc.player.isCreative() || mc.player.isSpectator()) return false;
+
         boolean hitUsRecently = recentEntityDamageSources.containsKey(clientEntity);
         boolean attacking = clientEntity instanceof MobEntity mob && mob.isAttacking();
-        boolean facingUs = isFacingPlayer(clientEntity);
+        boolean angryAtUs = isAngryAtPlayer(clientEntity);
 
         if (mode == RMEntityTargetMode.TARGET_ME) {
-            return hitUsRecently || (attacking && facingUs);
+            if (hitUsRecently || angryAtUs) return true;
+
+            // geometry: has to be an actual hunter, not just a mob that happens to face us
+            return attacking
+                    && looksAtPlayer(clientEntity)
+                    && isApproachingPlayer(clientEntity)
+                    && hasLineOfSight(clientEntity)
+                    && isNearestPlayer(clientEntity);
         }
 
-        return attacking && !hitUsRecently && !facingUs;
+        // targeting something that is not us
+        return attacking && !hitUsRecently && !angryAtUs && !looksAtPlayer(clientEntity);
     }
 
-    /** Rough "is this mob looking at the player" check, entity rotation is synced to clients. */
-    private static boolean isFacingPlayer(Entity entity) {
+    /** Warden anger is one of the very few AI states vanilla syncs to clients (data tracker). */
+    private static boolean isAngryAtPlayer(Entity entity) {
+        if (entity instanceof WardenEntity warden) {
+            return warden.getAnger() >= WARDEN_HUNTING_ANGER;
+        }
+        return false;
+    }
+
+    /** "Is this mob looking at the player" — head yaw leads the body when a mob turns. */
+    private static boolean looksAtPlayer(Entity entity) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null || mc.player == null) return false;
 
@@ -880,14 +985,55 @@ public final class SongPicker {
         double dz = mc.player.getZ() - entity.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance < 0.001) return true;
-        if (distance > 16) return false;
+        if (distance > TARGET_FACING_RANGE) return false;
 
-        // dot product of the mob's look vector with the direction to the player
-        double lookX = -Math.sin(Math.toRadians(entity.getYaw()));
-        double lookZ = Math.cos(Math.toRadians(entity.getYaw()));
+        double yaw = Math.toRadians(entity.getHeadYaw());
+        double lookX = -Math.sin(yaw);
+        double lookZ = Math.cos(yaw);
         double dot = (lookX * dx + lookZ * dz) / distance;
 
-        return dot > 0.9;
+        return dot > TARGET_FACING_DOT;
+    }
+
+    /** Is the mob moving towards the player, not just standing or strafing. */
+    private static boolean isApproachingPlayer(Entity entity) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.player == null) return false;
+
+        Vec3d velocity = entity.getVelocity();
+        double dx = mc.player.getX() - entity.getX();
+        double dz = mc.player.getZ() - entity.getZ();
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        if (horizontal < 0.001) return true;
+
+        return (velocity.x * dx + velocity.z * dz) / horizontal > 0.01;
+    }
+
+    /** Blocks between the mob's eyes and ours, so a mob behind a wall is not counted as hunting. */
+    private static boolean hasLineOfSight(Entity entity) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.world == null || mc.player == null) return true;
+
+        Vec3d from = new Vec3d(entity.getX(), entity.getEyeY(), entity.getZ());
+        Vec3d to = new Vec3d(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ());
+
+        BlockHitResult hit = mc.world.raycast(new RaycastContext(from, to,
+                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, entity));
+
+        return hit.getType() == HitResult.Type.MISS;
+    }
+
+    /** Another player closer to the mob means it is probably after them, not us. */
+    private static boolean isNearestPlayer(Entity entity) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.world == null || mc.player == null) return false;
+
+        double best = mc.player.squaredDistanceTo(entity);
+        for (PlayerEntity other : mc.world.getPlayers()) {
+            if (other == mc.player || other.isSpectator()) continue;
+            if (other.squaredDistanceTo(entity) < best) return false;
+        }
+        return true;
     }
 
     static boolean anyBossMatches(List<RMEntryBossCondition> conds) {
