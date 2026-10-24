@@ -7,6 +7,7 @@ import circuitlord.reactivemusic.entries.RMEntryBossCondition;
 import circuitlord.reactivemusic.entries.RMEntryEntityCondition;
 import circuitlord.reactivemusic.entries.RMEntityTargetMode;
 import circuitlord.reactivemusic.entries.RMRuntimeEntry;
+import circuitlord.reactivemusic.client.handshake.ClientHandshakeManager;
 import circuitlord.reactivemusic.mixin.BossBarHudAccessor;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.block.Block;
@@ -131,6 +132,8 @@ public final class SongPicker {
     public static long entityScanCenterTick = 0L;
     /** World time, refreshed once per client tick; all debounce windows measure against it. */
     public static long currentWorldTick = 0L;
+    /** Клиентский менеджер рукопожатия с серверным модом. */
+    public static ClientHandshakeManager clientHandshakeManager = new ClientHandshakeManager();
 
 
     private static final Random rand = new Random();
@@ -447,6 +450,8 @@ public final class SongPicker {
         // Structure data is never sent to the client, it only exists on the server side.
         // The integrated singleplayer server is reachable from here, dedicated servers are not,
         // so STRUCT events only work in singleplayer (they stay false in multiplayer).
+        // Require handshake confirmation before reading structure data from the integrated server.
+        if (!clientHandshakeManager.isAcknowledged()) return;
         var server = mc.getServer();
         if (server == null) return;
 
@@ -874,10 +879,13 @@ public final class SongPicker {
         if (mode == RMEntityTargetMode.ANY) return true;
 
         // ---- path 1: exact, needs an integrated server ----
-        Integer exact = serverSideTargetIsPlayer(clientEntity);
-        if (exact != null) {
-            if (mode == RMEntityTargetMode.TARGET_ME) return exact == 1;
-            return exact == 0;
+        // Only use exact server-side target if handshake confirmed server has the mod
+        if (clientHandshakeManager.isAcknowledged()) {
+            Integer exact = serverSideTargetIsPlayer(clientEntity);
+            if (exact != null) {
+                if (mode == RMEntityTargetMode.TARGET_ME) return exact == 1;
+                return exact == 0;
+            }
         }
 
         // ---- path 2: pure client, no server side at all ----
