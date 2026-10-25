@@ -46,6 +46,7 @@ import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.lang.reflect.Method;
 
 public final class SongPicker {
@@ -918,9 +919,11 @@ public final class SongPicker {
      *   <li><b>Pure-client heuristic</b> (dedicated server without server mod): contact damage,
      *       aggression flag, warden anger, and geometry.</li>
      * </ol>
-     * If the client has no target info for a mob (paths 1 or 2 returned nothing), the mob is
-     * treated as not targeting the player — {@code target=me} is false, {@code target=other} may
-     * still be true if the server explicitly said the mob targets someone else.
+     * <p>
+     * {@code target=me} is true only when the server explicitly confirmed this exact player is
+     * the mob's target. {@code target=other} is true only when the server explicitly confirmed
+     * the mob targets someone/something else. If the server said the mob has no target, or no
+     * information was received at all, both are false.
      */
     static boolean entityTargetMatches(Entity clientEntity, RMEntityTargetMode mode) {
         if (mode == RMEntityTargetMode.ANY) return true;
@@ -935,14 +938,18 @@ public final class SongPicker {
                 if (mode == RMEntityTargetMode.TARGET_ME) return exact == 1;
                 return exact == 0;
             }
+            // exact == null means the mob has no target on the server — not targeting anyone
+            return false;
         }
 
         // ---- path 2: exact via server mod packet (dedicated server) ----
         if (clientHandshakeManager.isAcknowledged()) {
             UUID targetUuid = serverMobTargets.get(clientEntity.getUuid());
             if (targetUuid == null) {
-                // No target info for this mob: not targeting us (TARGET_ME=false), but may target other
-                return mode == RMEntityTargetMode.TARGET_OTHER;
+                // No explicit target info from the server for this mob:
+                // either we never got a packet, or the server said the mob has no target.
+                // In both cases neither target=me nor target=other holds.
+                return false;
             }
             boolean targetsUs = targetUuid.equals(mc.player.getUuid());
             if (mode == RMEntityTargetMode.TARGET_ME) return targetsUs;
@@ -969,7 +976,7 @@ public final class SongPicker {
             if (!(serverEntity instanceof MobEntity mob)) return null;
 
             var target = getMobTarget(mob);
-            if (target == null) return 0;
+            if (target == null) return null;
 
             return target.getUuid().equals(mc.player.getUuid()) ? 1 : 0;
         } catch (Exception e) {
