@@ -16,7 +16,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.CreditsScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.player.PlayerEntity;
 
 import net.minecraft.entity.mob.HostileEntity;
@@ -132,8 +131,6 @@ public final class SongPicker {
     public static BlockPos entityScanCenter = BlockPos.ORIGIN;
     /** World tick of the last entity scan, the grace window is measured against it. */
     public static long entityScanCenterTick = 0L;
-    /** World time, refreshed once per client tick; all debounce windows measure against it. */
-    public static long currentWorldTick = 0L;
     /** Клиентский менеджер рукопожатия с серверным модом. */
     public static ClientHandshakeManager clientHandshakeManager = new ClientHandshakeManager();
 
@@ -473,23 +470,18 @@ public final class SongPicker {
                 var structureRegistry = serverWorld.getRegistryManager().get(Registry.STRUCTURE_KEY);
                 //?}
 
-                // Scan 3x3 chunks around the player, structure bounding boxes can extend beyond their origin chunk
-                for (int dx = -1; dx <= 1; dx++) {
-                    for (int dz = -1; dz <= 1; dz++) {
-                        var chunk = serverWorld.getWorldChunk(new BlockPos(playerPos.getX() + dx * 16, playerPos.getY(), playerPos.getZ() + dz * 16));
-                        if (chunk == null) continue;
-
-                        // copy to avoid concurrent modification, the server thread can rebuild chunks at any time
-                        for (var startEntry : new ArrayList<>(chunk.getStructureStarts().entrySet())) {
-                            var start = startEntry.getValue();
-                            if (start == null || !start.hasChildren()) continue;
-                            if (!start.getBoundingBox().contains(playerPos)) continue;
-
-                            var id = structureRegistry.getId(startEntry.getKey());
-                            if (id != null) {
-                                currentStructureNames.add(id.toString().toLowerCase(Locale.ROOT));
-                            }
-                        }
+                // Exact: ask the structure accessor which structure actually contains the player.
+                // This handles huge structures (mansion, ancient city) whose StructureStart is stored
+                // many chunks away from the player's position.
+                var accessor = serverWorld.getStructureAccessor();
+                for (var entry : structureRegistry.getEntrySet()) {
+                    var structure = entry.getValue();
+                    var start = accessor.getStructureContaining(playerPos, structure);
+                    if (start == null || !start.hasChildren()) continue;
+                    if (!start.getBoundingBox().contains(playerPos)) continue;
+                    var id = structureRegistry.getId(structure);
+                    if (id != null) {
+                        currentStructureNames.add(id.toString().toLowerCase(Locale.ROOT));
                     }
                 }
             } catch (Exception ignored) {
@@ -551,15 +543,8 @@ public final class SongPicker {
         // повторяем рукопожатие, пока сервер не ответил — чтобы запрос/ответ не потерялись
         clientHandshakeManager.tickRetry();
 
-        // client-side damage detection: if health dropped this tick, we took damage
-        // (works on dedicated servers where PlayerEntity.damage() mixin may not fire)
-        float currentHealth = player.getHealth();
-        if (lastPlayerHealth >= 0.0f && currentHealth < lastPlayerHealth) {
-            registerDamageTaken(lastPlayerHealth - currentHealth);
-        }
-        lastPlayerHealth = currentHealth;
-
-        // a fresh world (new game, rejoin, dimension change) invalidates the previous snapshot
+        // a fresh world (new game, rejoin, dimension change) invalidates the previous snapshot.
+        // Reset BEFORE damage detection so a different health on the new world is not mistaken for damage.
         if (world != lastBlockScanWorld) {
             lastBlockScanWorld = world;
             blockCounterMap.clear();
@@ -568,6 +553,14 @@ public final class SongPicker {
             currentBlockCounterX = BLOCK_SCAN_RADIUS + 1;
             lastPlayerHealth = -1.0f; // reset health baseline on world change
         }
+
+        // client-side damage detection: if health dropped this tick, we took damage
+        // (works on dedicated servers where PlayerEntity.damage() mixin may not fire)
+        float currentHealth = player.getHealth();
+        if (lastPlayerHealth >= 0.0f && currentHealth < lastPlayerHealth) {
+            registerDamageTaken(lastPlayerHealth - currentHealth);
+        }
+        lastPlayerHealth = currentHealth;
 
         // advance one column of the cube per tick
         currentBlockCounterX++;

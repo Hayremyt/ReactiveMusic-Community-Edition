@@ -91,7 +91,7 @@ public class ForgeClientHandshake {
 
     @SubscribeEvent
     public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
-        SongPicker.clientHandshakeManager.onPlayerJoin("1.3.5");
+        SongPicker.clientHandshakeManager.onPlayerJoin(HandshakeConstants.MOD_VERSION);
     }
 
     @SubscribeEvent

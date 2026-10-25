@@ -85,7 +85,7 @@ public class FabricClientHandshake implements ClientModInitializer {
         //?}
 
         ClientPlayConnectionEvents.JOIN.register((handler, client, sentConnectPacket) -> {
-            manager.onPlayerJoin("1.3.5");
+            manager.onPlayerJoin(HandshakeConstants.MOD_VERSION);
         });
 
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {

@@ -40,8 +40,11 @@ public class NeoForgeClientHandshake {
                 NeoForgeClientHandshake::handleStructure);
 
         ClientHandshakeManager manager = SongPicker.clientHandshakeManager;
-        manager.setRequestSender(version ->
-                PacketDistributor.sendToServer(new HandshakeRequestPayload(version)));
+        manager.setRequestSender(version -> {
+            net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
+            if (mc.getNetworkHandler() == null) return; // не в игре/нет соединения — не шлём
+            PacketDistributor.sendToServer(new HandshakeRequestPayload(version));
+        });
     }
 
     private static void handleNoop(CustomPayload payload, IPayloadContext ctx) {
@@ -61,7 +64,7 @@ public class NeoForgeClientHandshake {
 
     @SubscribeEvent
     public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
-        SongPicker.clientHandshakeManager.onPlayerJoin("1.3.5");
+        SongPicker.clientHandshakeManager.onPlayerJoin(HandshakeConstants.MOD_VERSION);
     }
 
     @SubscribeEvent

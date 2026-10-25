@@ -5,8 +5,10 @@ package circuitlord.reactivemusic.client.handshake;
  */
 public final class HandshakeConstants {
 
-    public static final long HANDSHAKE_TIMEOUT_MS = 5000L;
     public static final long HANDSHAKE_RETRY_MS = 1000L;
+
+    /** Версия мода/протокола, которой обмениваются клиент и сервер. */
+    public static final String MOD_VERSION = "1.3.5";
 
     /** Клиент ↔ Сервер: рукопожатие (HandshakeRequest / HandshakeResponse). */
     public static final String CHANNEL_ID = "reactivemusic:server";

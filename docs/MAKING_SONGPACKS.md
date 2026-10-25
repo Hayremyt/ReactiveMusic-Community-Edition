@@ -398,19 +398,20 @@ Optional parameters are named, so the order doesn't matter and you only write wh
 
 Positional values are not accepted here (`ENTITY=zombie,32` is an error) — this condition is new, so there is nothing to stay compatible with.
 
-`target=me` / `target=other` check what the mob is aiming at. Vanilla never syncs mob targets to the client, so there are two separate paths:
+`target=me` / `target=other` check what the mob is aiming at. Vanilla never syncs mob targets to the client, so detection depends on what source is available:
 
-1. **Integrated server available** (singleplayer, or the host of a LAN world) — the mod reads the real mob target from the server world. The result is **exact at any distance**: a warden hunting you from 40 blocks away is detected correctly, even while you dodge its attacks.
-2. **No integrated server** (vanilla multiplayer / dedicated server) — the mod falls back to a pure-client heuristic built only from state the server syncs to clients:
+1. **Integrated server** (singleplayer, or the host of a LAN world) — the mod reads the real mob target from the integrated server world. **Exact at any distance**: a warden hunting you from 40 blocks away is detected correctly, even while you dodge its attacks.
+2. **Dedicated server with ReactiveMusic-Server** — the server computes, **per player**, only a status — *targets me* / *targets someone else* / *no target* — and sends just that status. The client never learns **who** the target is, so there is no identity leak. Exact when the server mod is installed.
+3. **No exact source** (vanilla multiplayer / dedicated without the server mod) — a pure-client heuristic built only from state the server syncs to clients:
    - the mob recently damaged you (melee, or the archer behind an arrow),
    - the mob is an angry warden (its anger level is synced),
    - the mob is actively aggressive **and** looking at you **and** moving towards you **and** has line of sight **and** you are the closest player.
 
    This is a hint, not a fact. A distant skeleton shooting from behind cover, or a mob that is chasing you but standing still behind a wall, can be missed.
 
-`target=other` means the mob is aggressive, but does not look at you and has not hit you recently.
+`target=other`: in the exact paths (1 and 2) it means the server/game confirmed the mob targets someone else; in the heuristic path (3) it means the mob is aggressive but not looking at you and has not hit you recently.
 
-**Note on boundaries:** once an `ENTITY=` condition matches, it stays true for another 2 seconds after the mobs stop matching. A mob pacing across the `below=`/`above=` edge therefore cannot make the music flip back and forth.
+**Note on boundaries:** once an `ENTITY=` condition matches, it stays true for a short while after the mobs stop matching — up to ~3 seconds (a 2-second grace window plus the entity scan granularity). A mob pacing across the `below=`/`above=` edge therefore cannot make the music flip back and forth.
 
 Find entity ids with the vanilla command `/summon ` (autocomplete lists everything, including modded ones).
 
