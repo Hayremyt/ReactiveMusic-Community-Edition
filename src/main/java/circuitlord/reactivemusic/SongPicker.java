@@ -135,6 +135,12 @@ public final class SongPicker {
     /** Клиентский менеджер рукопожатия с серверным модом. */
     public static ClientHandshakeManager clientHandshakeManager = new ClientHandshakeManager();
 
+    /** Цели мобов от серверного мода (dedicated server). UUID моба -> UUID цели. */
+    public static final Map<UUID, UUID> serverMobTargets = new ConcurrentHashMap<>();
+
+    /** Структуры от серверного мода (dedicated server). */
+    public static final Set<String> serverStructureNames = ConcurrentHashMap.newKeySet();
+
 
     private static final Random rand = new Random();
 
@@ -179,6 +185,8 @@ public final class SongPicker {
             recentCombatHits.clear();
             lastDamageTakenTime = NEVER_HAPPENED;
             lastHeavyHitTime = NEVER_HAPPENED;
+            serverMobTargets.clear();
+            serverStructureNames.clear();
             return;
         }
 
@@ -447,47 +455,83 @@ public final class SongPicker {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null) return;
 
-        // Structure data is never sent to the client, it only exists on the server side.
-        // The integrated singleplayer server is reachable from here, dedicated servers are not,
-        // so STRUCT events only work in singleplayer (they stay false in multiplayer).
-        // Require handshake confirmation before reading structure data from the integrated server.
-        if (!clientHandshakeManager.isAcknowledged()) return;
-        var server = mc.getServer();
-        if (server == null) return;
+        // Path 1: integrated server (singleplayer / LAN) — read structures directly from the
+        // integrated server world. No server mod needed; mc.getServer() is available here.
+        var integratedServer = mc.getServer();
+        if (integratedServer != null) {
+            try {
+                var serverWorld = integratedServer.getWorld(world.getRegistryKey());
+                if (serverWorld == null) return;
 
-        try {
-            var serverWorld = server.getWorld(world.getRegistryKey());
-            if (serverWorld == null) return;
+                //? if >=1.21.11 {
+                /*var structureRegistry = serverWorld.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
+                *///?} else if >=1.20 {
+                /*var structureRegistry = serverWorld.getRegistryManager().get(RegistryKeys.STRUCTURE);
+                *///?} else {
+                var structureRegistry = serverWorld.getRegistryManager().get(Registry.STRUCTURE_KEY);
+                //?}
 
-            //? if >=1.21.11 {
-            /*var structureRegistry = serverWorld.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
-            *///?} else if >=1.20 {
-            /*var structureRegistry = serverWorld.getRegistryManager().get(RegistryKeys.STRUCTURE);
-            *///?} else {
-            var structureRegistry = serverWorld.getRegistryManager().get(Registry.STRUCTURE_KEY);
-            //?}
+                // Scan 3x3 chunks around the player, structure bounding boxes can extend beyond their origin chunk
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        var chunk = serverWorld.getWorldChunk(new BlockPos(playerPos.getX() + dx * 16, playerPos.getY(), playerPos.getZ() + dz * 16));
+                        if (chunk == null) continue;
 
-            // Scan 3x3 chunks around the player, structure bounding boxes can extend beyond their origin chunk
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    var chunk = serverWorld.getWorldChunk(new BlockPos(playerPos.getX() + dx * 16, playerPos.getY(), playerPos.getZ() + dz * 16));
-                    if (chunk == null) continue;
+                        // copy to avoid concurrent modification, the server thread can rebuild chunks at any time
+                        for (var startEntry : new ArrayList<>(chunk.getStructureStarts().entrySet())) {
+                            var start = startEntry.getValue();
+                            if (start == null || !start.hasChildren()) continue;
+                            if (!start.getBoundingBox().contains(playerPos)) continue;
 
-                    // copy to avoid concurrent modification, the server thread can rebuild chunks at any time
-                    for (var startEntry : new ArrayList<>(chunk.getStructureStarts().entrySet())) {
-                        var start = startEntry.getValue();
-                        if (start == null || !start.hasChildren()) continue;
-                        if (!start.getBoundingBox().contains(playerPos)) continue;
-
-                        var id = structureRegistry.getId(startEntry.getKey());
-                        if (id != null) {
-                            currentStructureNames.add(id.toString().toLowerCase(Locale.ROOT));
+                            var id = structureRegistry.getId(startEntry.getKey());
+                            if (id != null) {
+                                currentStructureNames.add(id.toString().toLowerCase(Locale.ROOT));
+                            }
                         }
                     }
                 }
+            } catch (Exception ignored) {
+                // never let structure lookup break the music tick
             }
-        } catch (Exception ignored) {
-            // never let structure lookup break the music tick
+            return;
+        }
+
+        // Path 2: dedicated server with server mod — use structure data received via network packet.
+        if (clientHandshakeManager.isAcknowledged()) {
+            currentStructureNames.addAll(serverStructureNames);
+            return;
+        }
+
+        // Path 3: dedicated server without server mod — STRUCT stays false.
+    }
+
+    /**
+     * Called from the loader-specific network handler when a {@code MobTargetPacket} arrives
+     * from the server mod (dedicated server only).
+     *
+     * @param mobUuid    UUID of the mob whose target changed
+     * @param targetUuid UUID of the target, or {@code null} if the mob has no target
+     */
+    public static void onMobTargetPacket(UUID mobUuid, UUID targetUuid) {
+        if (targetUuid == null) {
+            serverMobTargets.remove(mobUuid);
+        } else {
+            serverMobTargets.put(mobUuid, targetUuid);
+        }
+    }
+
+    /**
+     * Called from the loader-specific network handler when a {@code StructurePacket} arrives
+     * from the server mod (dedicated server only).
+     *
+     * @param structures array of structure IDs currently around the player
+     */
+    public static void onStructurePacket(String[] structures) {
+        serverStructureNames.clear();
+        for (String s : structures) {
+            if (s != null) {
+                serverStructureNames.add(s.toLowerCase(Locale.ROOT));
+            }
         }
     }
 
@@ -865,22 +909,27 @@ public final class SongPicker {
     /**
      * Checks the mob's target against the requested mode.
      * <p>
-     * Two clearly separated paths:
+     * Three clearly separated paths:
      * <ol>
-     *   <li><b>Integrated server available</b> (singleplayer / LAN host): the real mob target is read
-     *       from the server world, so the result is exact at any distance — a warden hunting you from
-     *       40 blocks away is detected correctly.</li>
-     *   <li><b>No integrated server</b> (vanilla multiplayer / dedicated server): the server never
-     *       sends mob targets, so we fall back to a pure-client heuristic built from synced state
-     *       only — contact damage, aggression flag, warden anger, and geometry.</li>
+     *   <li><b>Integrated server</b> (singleplayer / LAN host): the real mob target is read
+     *       from the integrated server world directly, no server mod needed.</li>
+     *   <li><b>Server mod packet</b> (dedicated server with ReactiveMusic-Server): the exact
+     *       target arrives via {@link #onMobTargetPacket(UUID, UUID)} over the network.</li>
+     *   <li><b>Pure-client heuristic</b> (dedicated server without server mod): contact damage,
+     *       aggression flag, warden anger, and geometry.</li>
      * </ol>
+     * If the client has no target info for a mob (paths 1 or 2 returned nothing), the mob is
+     * treated as not targeting the player — {@code target=me} is false, {@code target=other} may
+     * still be true if the server explicitly said the mob targets someone else.
      */
     static boolean entityTargetMatches(Entity clientEntity, RMEntityTargetMode mode) {
         if (mode == RMEntityTargetMode.ANY) return true;
 
-        // ---- path 1: exact, needs an integrated server ----
-        // Only use exact server-side target if handshake confirmed server has the mod
-        if (clientHandshakeManager.isAcknowledged()) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.player == null) return false;
+
+        // ---- path 1: exact via integrated server (SP/LAN) ----
+        if (mc.getServer() != null) {
             Integer exact = serverSideTargetIsPlayer(clientEntity);
             if (exact != null) {
                 if (mode == RMEntityTargetMode.TARGET_ME) return exact == 1;
@@ -888,7 +937,19 @@ public final class SongPicker {
             }
         }
 
-        // ---- path 2: pure client, no server side at all ----
+        // ---- path 2: exact via server mod packet (dedicated server) ----
+        if (clientHandshakeManager.isAcknowledged()) {
+            UUID targetUuid = serverMobTargets.get(clientEntity.getUuid());
+            if (targetUuid == null) {
+                // No target info for this mob: not targeting us (TARGET_ME=false), but may target other
+                return mode == RMEntityTargetMode.TARGET_OTHER;
+            }
+            boolean targetsUs = targetUuid.equals(mc.player.getUuid());
+            if (mode == RMEntityTargetMode.TARGET_ME) return targetsUs;
+            return !targetsUs; // TARGET_OTHER
+        }
+
+        // ---- path 3: pure client heuristic ----
         return heuristicTargetMatches(clientEntity, mode);
     }
 

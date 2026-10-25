@@ -1,5 +1,7 @@
 package circuitlord.reactivemusic.client.handshake;
 
+import java.util.function.Consumer;
+
 /**
  * Клиентская часть рукопожатия с серверным модом ReactiveMusic-Server.
  * <p>
@@ -21,6 +23,9 @@ public class ClientHandshakeManager {
     /** Серверная версия, если известна. */
     private String serverVersion = null;
 
+    /** Отправитель HandshakeRequest, устанавливается веткой лоадера. */
+    private Consumer<String> requestSender = null;
+
     public void onPlayerJoin(String clientVersion) {
         serverAcknowledged = false;
         serverVersion = null;
@@ -39,12 +44,25 @@ public class ClientHandshakeManager {
         lastRequestTime = 0L;
     }
 
+    /** Очистить всё состояние (например, при выгрузке мира). */
+    public void clear() {
+        serverAcknowledged = false;
+        serverVersion = null;
+        lastRequestTime = 0L;
+    }
+
+    /** Установить отправитель HandshakeRequest (вызывается веткой лоадера). */
+    public void setRequestSender(Consumer<String> sender) {
+        this.requestSender = sender;
+    }
+
     public void sendRequest(String clientVersion) {
         lastRequestTime = System.currentTimeMillis();
-        // Сетевая отправка реализуется в ветке лоадера:
-        //   Fabric: ClientPlayNetworking.send(...)
-        //   Forge/NeoForge: SimpleChannel.sendToServer(...)
-        throw new UnsupportedOperationException("Loader-specific network send required");
+        if (requestSender != null) {
+            requestSender.accept(clientVersion);
+        } else {
+            throw new UnsupportedOperationException("Loader-specific network send required");
+        }
     }
 
     public boolean isAcknowledged() {

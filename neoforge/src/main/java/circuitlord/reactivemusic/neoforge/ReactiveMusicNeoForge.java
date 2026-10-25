@@ -2,6 +2,7 @@ package circuitlord.reactivemusic.neoforge;
 
 import circuitlord.reactivemusic.ReactiveMusic;
 import circuitlord.reactivemusic.SongPicker;
+import circuitlord.reactivemusic.neoforge.client.NeoForgeClientHandshake;
 import circuitlord.reactivemusic.config.ModConfig;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
@@ -33,6 +34,7 @@ public class ReactiveMusicNeoForge {
 
     private void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(ReactiveMusic::initClient);
+        NeoForgeClientHandshake.init(event);
     }
 
     @SubscribeEvent

@@ -2,6 +2,7 @@ package circuitlord.reactivemusic.forge;
 
 import circuitlord.reactivemusic.ReactiveMusic;
 import circuitlord.reactivemusic.SongPicker;
+import circuitlord.reactivemusic.forge.client.ForgeClientHandshake;
 import circuitlord.reactivemusic.config.ModConfig;
 import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.client.MinecraftClient;
@@ -37,6 +38,7 @@ public class ReactiveMusicForge {
 
     private void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(ReactiveMusic::initClient);
+        ForgeClientHandshake.init(event);
     }
 
     @SubscribeEvent
