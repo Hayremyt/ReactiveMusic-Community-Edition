@@ -16,7 +16,8 @@
 	"environment": "client",
 	"entrypoints": {
 		"client": [
-			"circuitlord.reactivemusic.fabric.ReactiveMusicFabric"
+			"circuitlord.reactivemusic.fabric.ReactiveMusicFabric",
+			"circuitlord.reactivemusic.fabric.client.FabricClientHandshake"
 		],
 		"modmenu": [
 			"circuitlord.reactivemusic.fabric.ModMenuIntegration"

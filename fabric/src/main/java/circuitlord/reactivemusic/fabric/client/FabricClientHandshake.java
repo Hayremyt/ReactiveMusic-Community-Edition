@@ -3,69 +3,144 @@ package circuitlord.reactivemusic.fabric.client;
 import circuitlord.reactivemusic.SongPicker;
 import circuitlord.reactivemusic.client.handshake.ClientHandshakeManager;
 import circuitlord.reactivemusic.client.handshake.HandshakeConstants;
-import circuitlord.reactivemusic.client.network.HandshakePackets;
-import circuitlord.reactivemusic.client.network.ServerDataPackets;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.network.PacketByteBuf;
-import net.minecraft.network.PacketByteBufs;
+import net.minecraft.util.Identifier;
 
-/**
- * Клиентская сетевая интеграция с серверным модом для Fabric.
- * <p>
- * Регистрирует приём пакетов рукопожатия, целей мобов и структур по сети.
- * Отправляет HandshakeRequest при входе на сервер.
- */
+//? if >=1.20.5 {
+/*import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.minecraft.network.RegistryByteBuf;
+import net.minecraft.network.codec.PacketCodec;
+import net.minecraft.network.packet.CustomPayload;
+
+import java.util.UUID;
+*///?} else {
+import circuitlord.reactivemusic.client.network.HandshakePackets;
+import circuitlord.reactivemusic.client.network.ServerDataPackets;
+import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.minecraft.network.PacketByteBuf;
+//?}
+
 public class FabricClientHandshake implements ClientModInitializer {
+
+    //? if >=1.20.5 {
+    /*private static final Identifier ID_HANDSHAKE_REQUEST = Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_REQUEST);
+    private static final Identifier ID_HANDSHAKE_RESPONSE = Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_RESPONSE);
+    private static final Identifier ID_TARGETS = Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS);
+    private static final Identifier ID_STRUCTURES = Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES);
+    *///?} else {
+    private static final Identifier ID_HANDSHAKE = Identifier.tryParse(HandshakeConstants.CHANNEL_ID);
+    private static final Identifier ID_TARGETS = Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS);
+    private static final Identifier ID_STRUCTURES = Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES);
+    //?}
 
     @Override
     public void onInitializeClient() {
         ClientHandshakeManager manager = SongPicker.clientHandshakeManager;
 
-        // --- Отправитель HandshakeRequest (клиент -> сервер) ---
-        manager.setRequestSender(clientVersion -> {
-            PacketByteBuf buf = new PacketByteBuf(PacketByteBufs.empty());
-            new HandshakePackets.HandshakeRequest(clientVersion).write(buf);
-            ClientPlayNetworking.send(HandshakeConstants.CHANNEL_ID, buf);
+        //? if >=1.20.5 {
+        /*PayloadTypeRegistry.playC2S().register(HandshakeRequestPayload.TYPE, HandshakeRequestPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(HandshakeResponsePayload.TYPE, HandshakeResponsePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(MobTargetPayload.TYPE, MobTargetPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(StructurePayload.TYPE, StructurePayload.CODEC);
+
+        manager.setRequestSender(version -> ClientPlayNetworking.send(new HandshakeRequestPayload(version)));
+
+        ClientPlayNetworking.registerGlobalReceiver(HandshakeResponsePayload.TYPE,
+                (payload, context) -> SongPicker.clientHandshakeManager.onServerResponse(payload.serverVersion()));
+        ClientPlayNetworking.registerGlobalReceiver(MobTargetPayload.TYPE,
+                (payload, context) -> SongPicker.onMobTargetPacket(payload.mobUuid(), payload.targetUuid()));
+        ClientPlayNetworking.registerGlobalReceiver(StructurePayload.TYPE,
+                (payload, context) -> SongPicker.onStructurePacket(payload.structures()));
+        *///?} else {
+        manager.setRequestSender(version -> {
+            PacketByteBuf buf = PacketByteBufs.create();
+            new HandshakePackets.HandshakeRequest(version).write(buf);
+            ClientPlayNetworking.send(ID_HANDSHAKE, buf);
         });
 
-        // --- Приём HandshakeResponse (сервер -> клиент) ---
-        ClientPlayNetworking.registerReceiver(
-                HandshakeConstants.CHANNEL_ID,
+        ClientPlayNetworking.registerGlobalReceiver(ID_HANDSHAKE,
                 (client, handler, buf, responseSender) -> {
                     var response = HandshakePackets.HandshakeResponse.read(buf);
                     manager.onServerResponse(response.serverVersion);
-                }
-        );
+                });
 
-        // --- Приём MobTargetPacket (сервер -> клиент) ---
-        ClientPlayNetworking.registerReceiver(
-                HandshakeConstants.CHANNEL_TARGETS,
+        ClientPlayNetworking.registerGlobalReceiver(ID_TARGETS,
                 (client, handler, buf, responseSender) -> {
                     var packet = ServerDataPackets.MobTargetPacket.read(buf);
                     SongPicker.onMobTargetPacket(packet.mobUuid, packet.targetUuid);
-                }
-        );
+                });
 
-        // --- Приём StructurePacket (сервер -> клиент) ---
-        ClientPlayNetworking.registerReceiver(
-                HandshakeConstants.CHANNEL_STRUCTURES,
+        ClientPlayNetworking.registerGlobalReceiver(ID_STRUCTURES,
                 (client, handler, buf, responseSender) -> {
                     var packet = ServerDataPackets.StructurePacket.read(buf);
                     SongPicker.onStructurePacket(packet.structures);
-                }
-        );
+                });
+        //?}
 
-        // --- Вход на сервер: инициируем рукопожатие ---
         ClientPlayConnectionEvents.JOIN.register((handler, client, sentConnectPacket) -> {
             manager.onPlayerJoin("1.3.5");
         });
 
-        // --- Выход с сервера: сбрасываем состояние ---
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             manager.onPlayerLeave();
             manager.clear();
         });
     }
+
+    //? if >=1.20.5 {
+    /*public record HandshakeRequestPayload(String clientVersion) implements CustomPayload {
+        public static final CustomPayload.Id<HandshakeRequestPayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_REQUEST));
+        public static final PacketCodec<RegistryByteBuf, HandshakeRequestPayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, HandshakeRequestPayload v) -> buf.writeString(v.clientVersion()),
+                buf -> new HandshakeRequestPayload(buf.readString()));
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
+    }
+
+    public record HandshakeResponsePayload(String serverVersion) implements CustomPayload {
+        public static final CustomPayload.Id<HandshakeResponsePayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_RESPONSE));
+        public static final PacketCodec<RegistryByteBuf, HandshakeResponsePayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, HandshakeResponsePayload v) -> buf.writeString(v.serverVersion()),
+                buf -> new HandshakeResponsePayload(buf.readString()));
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
+    }
+
+    public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
+        public static final CustomPayload.Id<MobTargetPayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
+        public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, MobTargetPayload v) -> {
+                    buf.writeUuid(v.mobUuid());
+                    if (v.targetUuid() == null) buf.writeBoolean(false);
+                    else { buf.writeBoolean(true); buf.writeUuid(v.targetUuid()); }
+                },
+                buf -> {
+                    UUID mob = buf.readUuid();
+                    boolean has = buf.readBoolean();
+                    UUID target = has ? buf.readUuid() : null;
+                    return new MobTargetPayload(mob, target);
+                });
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
+    }
+
+    public record StructurePayload(String[] structures) implements CustomPayload {
+        public static final CustomPayload.Id<StructurePayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES));
+        public static final PacketCodec<RegistryByteBuf, StructurePayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, StructurePayload v) -> {
+                    buf.writeInt(v.structures().length);
+                    for (String s : v.structures()) buf.writeString(s);
+                },
+                buf -> {
+                    int len = buf.readInt();
+                    String[] arr = new String[len];
+                    for (int i = 0; i < len; i++) arr[i] = buf.readString();
+                    return new StructurePayload(arr);
+                });
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
+    }
+    *///?}
 }

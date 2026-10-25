@@ -24,6 +24,7 @@ public class ReactiveMusicNeoForge {
     public ReactiveMusicNeoForge(IEventBus modEventBus) {
         ReactiveMusic.init();
         modEventBus.addListener(this::onClientSetup);
+        modEventBus.addListener(NeoForgeClientHandshake::registerPayloads);
         NeoForge.EVENT_BUS.register(this);
 
         ModLoadingContext.get().registerExtensionPoint(
@@ -34,7 +35,6 @@ public class ReactiveMusicNeoForge {
 
     private void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(ReactiveMusic::initClient);
-        NeoForgeClientHandshake.init(event);
     }
 
     @SubscribeEvent

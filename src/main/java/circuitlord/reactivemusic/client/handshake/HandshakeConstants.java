@@ -17,5 +17,11 @@ public final class HandshakeConstants {
     /** Сервер → Клиент: StructurePacket (структуры вокруг игрока от серверного мода). */
     public static final String CHANNEL_STRUCTURES = "reactivemusic:server/structures";
 
+    /** Payload-id рукопожатия (клиент → сервер) для payload-API (1.20.5+). */
+    public static final String CHANNEL_HANDSHAKE_REQUEST = "reactivemusic:server/handshake_request";
+
+    /** Payload-id рукопожатия (сервер → клиент) для payload-API (1.20.5+). */
+    public static final String CHANNEL_HANDSHAKE_RESPONSE = "reactivemusic:server/handshake_response";
+
     private HandshakeConstants() {}
 }

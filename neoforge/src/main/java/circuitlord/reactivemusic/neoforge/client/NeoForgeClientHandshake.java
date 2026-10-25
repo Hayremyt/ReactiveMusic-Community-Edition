@@ -3,139 +3,124 @@ package circuitlord.reactivemusic.neoforge.client;
 import circuitlord.reactivemusic.SongPicker;
 import circuitlord.reactivemusic.client.handshake.ClientHandshakeManager;
 import circuitlord.reactivemusic.client.handshake.HandshakeConstants;
-import circuitlord.reactivemusic.client.network.HandshakePackets;
-import circuitlord.reactivemusic.client.network.ServerDataPackets;
-import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.RegistryByteBuf;
+import net.minecraft.network.codec.PacketCodec;
+import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.util.Identifier;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
-import net.neoforged.network.NetworkEvent;
-import net.neoforged.network.NetworkRegistry;
-import net.neoforged.network.simple.SimpleChannel;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
-import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.UUID;
 
 /**
- * Клиентская сетевая интеграция с серверным модом для NeoForge.
- * <p>
- * Регистрирует приём пакетов рукопожатия, целей мобов и структур по сети.
- * Отправляет HandshakeRequest при входе на сервер.
+ * Клиентская сетевая интеграция с серверным модом для NeoForge (payload-API).
+ * Идентификаторы payload'ов и кодеки совпадают с серверным модом.
  */
 @EventBusSubscriber(modid = "reactivemusic", value = Dist.CLIENT)
 public class NeoForgeClientHandshake {
 
-    private static SimpleChannel handshakeChannel;
-    private static SimpleChannel targetsChannel;
-    private static SimpleChannel structuresChannel;
+    /** Регистрация payload'ов (вызывается из mod event bus). */
+    public static void registerPayloads(RegisterPayloadHandlersEvent event) {
+        PayloadRegistrar registrar = event.registrar("1").optional();
 
-    public static void init(FMLClientSetupEvent event) {
-        event.enqueueWork(() -> {
-            ClientHandshakeManager manager = SongPicker.clientHandshakeManager;
+        registrar.playToServer(HandshakeRequestPayload.TYPE, HandshakeRequestPayload.CODEC,
+                NeoForgeClientHandshake::handleNoop);
+        registrar.playToClient(HandshakeResponsePayload.TYPE, HandshakeResponsePayload.CODEC,
+                NeoForgeClientHandshake::handleResponse);
+        registrar.playToClient(MobTargetPayload.TYPE, MobTargetPayload.CODEC,
+                NeoForgeClientHandshake::handleMobTarget);
+        registrar.playToClient(StructurePayload.TYPE, StructurePayload.CODEC,
+                NeoForgeClientHandshake::handleStructure);
 
-            // --- Канал рукопожатия ---
-            handshakeChannel = NetworkRegistry.ChannelBuilder
-                    .named(HandshakeConstants.CHANNEL_ID)
-                    .clientAcceptedVersions(s -> true)
-                    .serverAcceptedVersions(s -> true)
-                    .networkProtocolVersion(() -> "1")
-                    .simpleChannel();
+        ClientHandshakeManager manager = SongPicker.clientHandshakeManager;
+        manager.setRequestSender(version ->
+                PacketDistributor.sendToServer(new HandshakeRequestPayload(version)));
+    }
 
-            handshakeChannel.registerMessage(0, HandshakePackets.HandshakeResponse.class,
-                    NeoForgeClientHandshake::encodeResponse,
-                    NeoForgeClientHandshake::decodeResponse,
-                    NeoForgeClientHandshake::handleResponse);
+    private static void handleNoop(CustomPayload payload, IPayloadContext ctx) {
+    }
 
-            // Отправитель HandshakeRequest
-            manager.setRequestSender(clientVersion ->
-                    handshakeChannel.sendToServer(new HandshakePackets.HandshakeRequest(clientVersion)));
+    private static void handleResponse(HandshakeResponsePayload msg, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> SongPicker.clientHandshakeManager.onServerResponse(msg.serverVersion()));
+    }
 
-            // --- Канал целей мобов ---
-            targetsChannel = NetworkRegistry.ChannelBuilder
-                    .named(HandshakeConstants.CHANNEL_TARGETS)
-                    .clientAcceptedVersions(s -> true)
-                    .serverAcceptedVersions(s -> true)
-                    .networkProtocolVersion(() -> "1")
-                    .simpleChannel();
+    private static void handleMobTarget(MobTargetPayload msg, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> SongPicker.onMobTargetPacket(msg.mobUuid(), msg.targetUuid()));
+    }
 
-            targetsChannel.registerMessage(0, ServerDataPackets.MobTargetPacket.class,
-                    NeoForgeClientHandshake::encodeMobTarget,
-                    NeoForgeClientHandshake::decodeMobTarget,
-                    NeoForgeClientHandshake::handleMobTarget);
-
-            // --- Канал структур ---
-            structuresChannel = NetworkRegistry.ChannelBuilder
-                    .named(HandshakeConstants.CHANNEL_STRUCTURES)
-                    .clientAcceptedVersions(s -> true)
-                    .serverAcceptedVersions(s -> true)
-                    .networkProtocolVersion(() -> "1")
-                    .simpleChannel();
-
-            structuresChannel.registerMessage(0, ServerDataPackets.StructurePacket.class,
-                    NeoForgeClientHandshake::encodeStructure,
-                    NeoForgeClientHandshake::decodeStructure,
-                    NeoForgeClientHandshake::handleStructure);
-        });
+    private static void handleStructure(StructurePayload msg, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> SongPicker.onStructurePacket(msg.structures()));
     }
 
     @SubscribeEvent
-    public static void onClientLoggedIn(PlayerEvent.ClientLoggedInEvent event) {
+    public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
         SongPicker.clientHandshakeManager.onPlayerJoin("1.3.5");
     }
 
     @SubscribeEvent
-    public static void onClientLoggedOut(PlayerEvent.ClientLoggedOutEvent event) {
+    public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         SongPicker.clientHandshakeManager.onPlayerLeave();
         SongPicker.clientHandshakeManager.clear();
     }
 
-    // ---------- HandshakeResponse ----------
+    // ---------------- payload'ы (идентичны серверным) ----------------
 
-    private static void encodeResponse(HandshakePackets.HandshakeResponse msg, PacketByteBuf buf) {
-        msg.write(buf);
+    public record HandshakeRequestPayload(String clientVersion) implements CustomPayload {
+        public static final CustomPayload.Id<HandshakeRequestPayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_REQUEST));
+        public static final PacketCodec<RegistryByteBuf, HandshakeRequestPayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, HandshakeRequestPayload v) -> buf.writeString(v.clientVersion()),
+                buf -> new HandshakeRequestPayload(buf.readString()));
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 
-    private static HandshakePackets.HandshakeResponse decodeResponse(PacketByteBuf buf) {
-        return HandshakePackets.HandshakeResponse.read(buf);
+    public record HandshakeResponsePayload(String serverVersion) implements CustomPayload {
+        public static final CustomPayload.Id<HandshakeResponsePayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_HANDSHAKE_RESPONSE));
+        public static final PacketCodec<RegistryByteBuf, HandshakeResponsePayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, HandshakeResponsePayload v) -> buf.writeString(v.serverVersion()),
+                buf -> new HandshakeResponsePayload(buf.readString()));
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 
-    private static void handleResponse(HandshakePackets.HandshakeResponse msg,
-                                       Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> SongPicker.clientHandshakeManager.onServerResponse(msg.serverVersion));
-        ctx.get().setPacketHandled(true);
+    public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
+        public static final CustomPayload.Id<MobTargetPayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
+        public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, MobTargetPayload v) -> {
+                    buf.writeUuid(v.mobUuid());
+                    if (v.targetUuid() == null) buf.writeBoolean(false);
+                    else { buf.writeBoolean(true); buf.writeUuid(v.targetUuid()); }
+                },
+                buf -> {
+                    UUID mob = buf.readUuid();
+                    boolean has = buf.readBoolean();
+                    UUID target = has ? buf.readUuid() : null;
+                    return new MobTargetPayload(mob, target);
+                });
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 
-    // ---------- MobTargetPacket ----------
-
-    private static void encodeMobTarget(ServerDataPackets.MobTargetPacket msg, PacketByteBuf buf) {
-        msg.write(buf);
-    }
-
-    private static ServerDataPackets.MobTargetPacket decodeMobTarget(PacketByteBuf buf) {
-        return ServerDataPackets.MobTargetPacket.read(buf);
-    }
-
-    private static void handleMobTarget(ServerDataPackets.MobTargetPacket msg,
-                                        Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> SongPicker.onMobTargetPacket(msg.mobUuid, msg.targetUuid));
-        ctx.get().setPacketHandled(true);
-    }
-
-    // ---------- StructurePacket ----------
-
-    private static void encodeStructure(ServerDataPackets.StructurePacket msg, PacketByteBuf buf) {
-        msg.write(buf);
-    }
-
-    private static ServerDataPackets.StructurePacket decodeStructure(PacketByteBuf buf) {
-        return ServerDataPackets.StructurePacket.read(buf);
-    }
-
-    private static void handleStructure(ServerDataPackets.StructurePacket msg,
-                                        Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> SongPicker.onStructurePacket(msg.structures));
-        ctx.get().setPacketHandled(true);
+    public record StructurePayload(String[] structures) implements CustomPayload {
+        public static final CustomPayload.Id<StructurePayload> TYPE =
+                new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES));
+        public static final PacketCodec<RegistryByteBuf, StructurePayload> CODEC = PacketCodec.ofStatic(
+                (RegistryByteBuf buf, StructurePayload v) -> {
+                    buf.writeInt(v.structures().length);
+                    for (String s : v.structures()) buf.writeString(s);
+                },
+                buf -> {
+                    int len = buf.readInt();
+                    String[] arr = new String[len];
+                    for (int i = 0; i < len; i++) arr[i] = buf.readString();
+                    return new StructurePayload(arr);
+                });
+        @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 }

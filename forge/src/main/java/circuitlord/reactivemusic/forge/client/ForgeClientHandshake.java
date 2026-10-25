@@ -6,8 +6,9 @@ import circuitlord.reactivemusic.client.handshake.HandshakeConstants;
 import circuitlord.reactivemusic.client.network.HandshakePackets;
 import circuitlord.reactivemusic.client.network.ServerDataPackets;
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.util.Identifier;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
@@ -15,14 +16,13 @@ import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
 
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
  * Клиентская сетевая интеграция с серверным модом для Forge.
  * <p>
- * Регистрирует приём пакетов рукопожатия, целей мобов и структур по сети.
- * Отправляет HandshakeRequest при входе на сервер.
+ * Каналы и порядок сообщений совпадают с серверным модом (request@0, response@1 на канале
+ * рукопожатия; targets@0; structures@0), иначе Forge SimpleChannel не сможет декодировать.
  */
 @EventBusSubscriber(modid = "reactivemusic", value = Dist.CLIENT)
 public class ForgeClientHandshake {
@@ -35,29 +35,33 @@ public class ForgeClientHandshake {
         event.enqueueWork(() -> {
             ClientHandshakeManager manager = SongPicker.clientHandshakeManager;
 
-            // --- Канал рукопожатия ---
+            // --- Канал рукопожатия (request@0, response@1 — как на сервере) ---
             handshakeChannel = NetworkRegistry.ChannelBuilder
-                    .named(HandshakeConstants.CHANNEL_ID)
+                    .named(Identifier.tryParse(HandshakeConstants.CHANNEL_ID))
+                    .networkProtocolVersion(() -> "1")
                     .clientAcceptedVersions(s -> true)
                     .serverAcceptedVersions(s -> true)
-                    .networkProtocolVersion(() -> "1")
                     .simpleChannel();
 
-            handshakeChannel.registerMessage(0, HandshakePackets.HandshakeResponse.class,
+            handshakeChannel.registerMessage(0, HandshakePackets.HandshakeRequest.class,
+                    ForgeClientHandshake::encodeRequest,
+                    ForgeClientHandshake::decodeRequest,
+                    ForgeClientHandshake::handleNoop);
+
+            handshakeChannel.registerMessage(1, HandshakePackets.HandshakeResponse.class,
                     ForgeClientHandshake::encodeResponse,
                     ForgeClientHandshake::decodeResponse,
                     ForgeClientHandshake::handleResponse);
 
-            // Отправитель HandshakeRequest
             manager.setRequestSender(clientVersion ->
                     handshakeChannel.sendToServer(new HandshakePackets.HandshakeRequest(clientVersion)));
 
             // --- Канал целей мобов ---
             targetsChannel = NetworkRegistry.ChannelBuilder
-                    .named(HandshakeConstants.CHANNEL_TARGETS)
+                    .named(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS))
+                    .networkProtocolVersion(() -> "1")
                     .clientAcceptedVersions(s -> true)
                     .serverAcceptedVersions(s -> true)
-                    .networkProtocolVersion(() -> "1")
                     .simpleChannel();
 
             targetsChannel.registerMessage(0, ServerDataPackets.MobTargetPacket.class,
@@ -67,10 +71,10 @@ public class ForgeClientHandshake {
 
             // --- Канал структур ---
             structuresChannel = NetworkRegistry.ChannelBuilder
-                    .named(HandshakeConstants.CHANNEL_STRUCTURES)
+                    .named(Identifier.tryParse(HandshakeConstants.CHANNEL_STRUCTURES))
+                    .networkProtocolVersion(() -> "1")
                     .clientAcceptedVersions(s -> true)
                     .serverAcceptedVersions(s -> true)
-                    .networkProtocolVersion(() -> "1")
                     .simpleChannel();
 
             structuresChannel.registerMessage(0, ServerDataPackets.StructurePacket.class,
@@ -81,14 +85,24 @@ public class ForgeClientHandshake {
     }
 
     @SubscribeEvent
-    public static void onClientLoggedIn(PlayerEvent.ClientLoggedInEvent event) {
+    public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
         SongPicker.clientHandshakeManager.onPlayerJoin("1.3.5");
     }
 
     @SubscribeEvent
-    public static void onClientLoggedOut(PlayerEvent.ClientLoggedOutEvent event) {
+    public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         SongPicker.clientHandshakeManager.onPlayerLeave();
         SongPicker.clientHandshakeManager.clear();
+    }
+
+    // ---------- HandshakeRequest ----------
+
+    private static void encodeRequest(HandshakePackets.HandshakeRequest msg, PacketByteBuf buf) {
+        msg.write(buf);
+    }
+
+    private static HandshakePackets.HandshakeRequest decodeRequest(PacketByteBuf buf) {
+        return HandshakePackets.HandshakeRequest.read(buf);
     }
 
     // ---------- HandshakeResponse ----------
@@ -136,6 +150,10 @@ public class ForgeClientHandshake {
     private static void handleStructure(ServerDataPackets.StructurePacket msg,
                                         Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> SongPicker.onStructurePacket(msg.structures));
+        ctx.get().setPacketHandled(true);
+    }
+
+    private static void handleNoop(Object msg, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().setPacketHandled(true);
     }
 }
