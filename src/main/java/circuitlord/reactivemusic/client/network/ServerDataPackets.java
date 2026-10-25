@@ -12,31 +12,25 @@ import net.minecraft.network.PacketByteBuf;
  */
 public final class ServerDataPackets {
 
-    /** Сервер → Клиент: цель одного моба. */
+    /** Сервер → Клиент: статус цели одного моба относительно локального игрока. */
     public static class MobTargetPacket {
         public final UUID mobUuid;
-        public final UUID targetUuid; // null если цели нет
+        public final MobTargetStatus status;
 
-        public MobTargetPacket(UUID mobUuid, UUID targetUuid) {
+        public MobTargetPacket(UUID mobUuid, MobTargetStatus status) {
             this.mobUuid = mobUuid;
-            this.targetUuid = targetUuid;
+            this.status = status;
         }
 
         public void write(PacketByteBuf buf) {
             buf.writeUuid(mobUuid);
-            if (targetUuid == null) {
-                buf.writeBoolean(false);
-            } else {
-                buf.writeBoolean(true);
-                buf.writeUuid(targetUuid);
-            }
+            buf.writeByte(status.ordinal());
         }
 
         public static MobTargetPacket read(PacketByteBuf buf) {
             UUID mobUuid = buf.readUuid();
-            boolean hasTarget = buf.readBoolean();
-            UUID targetUuid = hasTarget ? buf.readUuid() : null;
-            return new MobTargetPacket(mobUuid, targetUuid);
+            MobTargetStatus status = MobTargetStatus.byOrdinal(buf.readByte());
+            return new MobTargetPacket(mobUuid, status);
         }
     }
 

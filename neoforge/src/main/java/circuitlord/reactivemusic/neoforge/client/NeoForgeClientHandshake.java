@@ -3,6 +3,7 @@ package circuitlord.reactivemusic.neoforge.client;
 import circuitlord.reactivemusic.SongPicker;
 import circuitlord.reactivemusic.client.handshake.ClientHandshakeManager;
 import circuitlord.reactivemusic.client.handshake.HandshakeConstants;
+import circuitlord.reactivemusic.client.network.MobTargetStatus;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
@@ -51,7 +52,7 @@ public class NeoForgeClientHandshake {
     }
 
     private static void handleMobTarget(MobTargetPayload msg, IPayloadContext ctx) {
-        ctx.enqueueWork(() -> SongPicker.onMobTargetPacket(msg.mobUuid(), msg.targetUuid()));
+        ctx.enqueueWork(() -> SongPicker.onMobTargetPacket(msg.mobUuid(), msg.status()));
     }
 
     private static void handleStructure(StructurePayload msg, IPayloadContext ctx) {
@@ -89,21 +90,15 @@ public class NeoForgeClientHandshake {
         @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 
-    public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
+    public record MobTargetPayload(UUID mobUuid, MobTargetStatus status) implements CustomPayload {
         public static final CustomPayload.Id<MobTargetPayload> TYPE =
                 new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
         public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, MobTargetPayload v) -> {
                     buf.writeUuid(v.mobUuid());
-                    if (v.targetUuid() == null) buf.writeBoolean(false);
-                    else { buf.writeBoolean(true); buf.writeUuid(v.targetUuid()); }
+                    buf.writeByte(v.status().ordinal());
                 },
-                buf -> {
-                    UUID mob = buf.readUuid();
-                    boolean has = buf.readBoolean();
-                    UUID target = has ? buf.readUuid() : null;
-                    return new MobTargetPayload(mob, target);
-                });
+                buf -> new MobTargetPayload(buf.readUuid(), MobTargetStatus.byOrdinal(buf.readByte())));
         @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 

@@ -3,6 +3,7 @@ package circuitlord.reactivemusic.fabric.client;
 import circuitlord.reactivemusic.SongPicker;
 import circuitlord.reactivemusic.client.handshake.ClientHandshakeManager;
 import circuitlord.reactivemusic.client.handshake.HandshakeConstants;
+import circuitlord.reactivemusic.client.network.MobTargetStatus;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -45,16 +46,20 @@ public class FabricClientHandshake implements ClientModInitializer {
         PayloadTypeRegistry.playS2C().register(MobTargetPayload.TYPE, MobTargetPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(StructurePayload.TYPE, StructurePayload.CODEC);
 
-        manager.setRequestSender(version -> ClientPlayNetworking.send(new HandshakeRequestPayload(version)));
+        manager.setRequestSender(version -> {
+            if (!ClientPlayNetworking.canSend(HandshakeRequestPayload.TYPE)) return; // сервер без мода — не шлём
+            ClientPlayNetworking.send(new HandshakeRequestPayload(version));
+        });
 
         ClientPlayNetworking.registerGlobalReceiver(HandshakeResponsePayload.TYPE,
                 (payload, context) -> SongPicker.clientHandshakeManager.onServerResponse(payload.serverVersion()));
         ClientPlayNetworking.registerGlobalReceiver(MobTargetPayload.TYPE,
-                (payload, context) -> SongPicker.onMobTargetPacket(payload.mobUuid(), payload.targetUuid()));
+                (payload, context) -> SongPicker.onMobTargetPacket(payload.mobUuid(), payload.status()));
         ClientPlayNetworking.registerGlobalReceiver(StructurePayload.TYPE,
                 (payload, context) -> SongPicker.onStructurePacket(payload.structures()));
         *///?} else {
         manager.setRequestSender(version -> {
+            if (!ClientPlayNetworking.canSend(ID_HANDSHAKE)) return; // сервер без мода — не шлём
             PacketByteBuf buf = PacketByteBufs.create();
             new HandshakePackets.HandshakeRequest(version).write(buf);
             ClientPlayNetworking.send(ID_HANDSHAKE, buf);
@@ -69,7 +74,7 @@ public class FabricClientHandshake implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(ID_TARGETS,
                 (client, handler, buf, responseSender) -> {
                     var packet = ServerDataPackets.MobTargetPacket.read(buf);
-                    SongPicker.onMobTargetPacket(packet.mobUuid, packet.targetUuid);
+                    SongPicker.onMobTargetPacket(packet.mobUuid, packet.status);
                 });
 
         ClientPlayNetworking.registerGlobalReceiver(ID_STRUCTURES,
@@ -108,21 +113,15 @@ public class FabricClientHandshake implements ClientModInitializer {
         @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 
-    public record MobTargetPayload(UUID mobUuid, UUID targetUuid) implements CustomPayload {
+    public record MobTargetPayload(UUID mobUuid, MobTargetStatus status) implements CustomPayload {
         public static final CustomPayload.Id<MobTargetPayload> TYPE =
                 new CustomPayload.Id<>(Identifier.tryParse(HandshakeConstants.CHANNEL_TARGETS));
         public static final PacketCodec<RegistryByteBuf, MobTargetPayload> CODEC = PacketCodec.ofStatic(
                 (RegistryByteBuf buf, MobTargetPayload v) -> {
                     buf.writeUuid(v.mobUuid());
-                    if (v.targetUuid() == null) buf.writeBoolean(false);
-                    else { buf.writeBoolean(true); buf.writeUuid(v.targetUuid()); }
+                    buf.writeByte(v.status().ordinal());
                 },
-                buf -> {
-                    UUID mob = buf.readUuid();
-                    boolean has = buf.readBoolean();
-                    UUID target = has ? buf.readUuid() : null;
-                    return new MobTargetPayload(mob, target);
-                });
+                buf -> new MobTargetPayload(buf.readUuid(), MobTargetStatus.byOrdinal(buf.readByte())));
         @Override public CustomPayload.Id<? extends CustomPayload> getId() { return TYPE; }
     }
 

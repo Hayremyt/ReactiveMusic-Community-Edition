@@ -8,6 +8,7 @@ import circuitlord.reactivemusic.entries.RMEntryEntityCondition;
 import circuitlord.reactivemusic.entries.RMEntityTargetMode;
 import circuitlord.reactivemusic.entries.RMRuntimeEntry;
 import circuitlord.reactivemusic.client.handshake.ClientHandshakeManager;
+import circuitlord.reactivemusic.client.network.MobTargetStatus;
 import circuitlord.reactivemusic.mixin.BossBarHudAccessor;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.block.Block;
@@ -136,8 +137,8 @@ public final class SongPicker {
     /** Клиентский менеджер рукопожатия с серверным модом. */
     public static ClientHandshakeManager clientHandshakeManager = new ClientHandshakeManager();
 
-    /** Цели мобов от серверного мода (dedicated server). UUID моба -> UUID цели. */
-    public static final Map<UUID, UUID> serverMobTargets = new ConcurrentHashMap<>();
+    /** Статусы целей мобов от серверного мода (dedicated server). UUID моба -> статус. */
+    public static final Map<UUID, MobTargetStatus> serverMobTargets = new ConcurrentHashMap<>();
 
     /** Структуры от серверного мода (dedicated server). */
     public static final Set<String> serverStructureNames = ConcurrentHashMap.newKeySet();
@@ -510,14 +511,14 @@ public final class SongPicker {
      * Called from the loader-specific network handler when a {@code MobTargetPacket} arrives
      * from the server mod (dedicated server only).
      *
-     * @param mobUuid    UUID of the mob whose target changed
-     * @param targetUuid UUID of the target, or {@code null} if the mob has no target
+     * @param mobUuid UUID of the mob whose target status changed
+     * @param status  ME / OTHER / NONE relative to the local player
      */
-    public static void onMobTargetPacket(UUID mobUuid, UUID targetUuid) {
-        if (targetUuid == null) {
+    public static void onMobTargetPacket(UUID mobUuid, MobTargetStatus status) {
+        if (status == null || status == MobTargetStatus.NONE) {
             serverMobTargets.remove(mobUuid);
         } else {
-            serverMobTargets.put(mobUuid, targetUuid);
+            serverMobTargets.put(mobUuid, status);
         }
     }
 
@@ -931,43 +932,34 @@ public final class SongPicker {
     static boolean entityTargetMatches(Entity clientEntity, RMEntityTargetMode mode) {
         if (mode == RMEntityTargetMode.ANY) return true;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc == null || mc.player == null) return false;
-
-        // ---- path 1: exact via integrated server (SP/LAN) ----
-        if (mc.getServer() != null) {
-            Integer exact = serverSideTargetIsPlayer(clientEntity);
-            if (exact != null) {
-                if (mode == RMEntityTargetMode.TARGET_ME) return exact == 1;
-                return exact == 0;
-            }
-            // exact == null means the mob has no target on the server — not targeting anyone
-            return false;
+        MobTargetStatus status = resolveTargetStatus(clientEntity);
+        if (status == null) {
+            // нет точных данных (ни интегрированного сервера, ни серверного мода) — эвристика
+            return heuristicTargetMatches(clientEntity, mode);
         }
-
-        // ---- path 2: exact via server mod packet (dedicated server) ----
-        if (clientHandshakeManager.isAcknowledged()) {
-            UUID targetUuid = serverMobTargets.get(clientEntity.getUuid());
-            if (targetUuid == null) {
-                // No explicit target info from the server for this mob:
-                // either we never got a packet, or the server said the mob has no target.
-                // In both cases neither target=me nor target=other holds.
-                return false;
-            }
-            boolean targetsUs = targetUuid.equals(mc.player.getUuid());
-            if (mode == RMEntityTargetMode.TARGET_ME) return targetsUs;
-            return !targetsUs; // TARGET_OTHER
-        }
-
-        // ---- path 3: pure client heuristic ----
-        return heuristicTargetMatches(clientEntity, mode);
+        if (mode == RMEntityTargetMode.TARGET_ME) return status == MobTargetStatus.ME;
+        return status == MobTargetStatus.OTHER;
     }
 
     /**
-     * 1 = the mob targets the player, 0 = the mob targets someone else, null = unknown (no server side).
-     * Only non-null when an integrated server is reachable.
+     * Статус цели моба для локального игрока: из интегрированного сервера (SP/LAN) или из пакетов
+     * серверного мода (dedicated). {@code null} — точных данных нет, использовать эвристику.
      */
-    private static Integer serverSideTargetIsPlayer(Entity clientEntity) {
+    private static MobTargetStatus resolveTargetStatus(Entity clientEntity) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.player == null) return null;
+
+        if (mc.getServer() != null) {
+            return serverSideTargetStatus(clientEntity);
+        }
+        if (clientHandshakeManager.isAcknowledged()) {
+            return serverMobTargets.getOrDefault(clientEntity.getUuid(), MobTargetStatus.NONE);
+        }
+        return null;
+    }
+
+    /** Статус цели моба из интегрированного сервера; {@code null} если моб не найден на сервере. */
+    private static MobTargetStatus serverSideTargetStatus(Entity clientEntity) {
         try {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc == null || mc.getServer() == null || mc.player == null) return null;
@@ -979,9 +971,9 @@ public final class SongPicker {
             if (!(serverEntity instanceof MobEntity mob)) return null;
 
             var target = getMobTarget(mob);
-            if (target == null) return null;
-
-            return target.getUuid().equals(mc.player.getUuid()) ? 1 : 0;
+            if (target == null) return MobTargetStatus.NONE;
+            return target.getUuid().equals(mc.player.getUuid())
+                    ? MobTargetStatus.ME : MobTargetStatus.OTHER;
         } catch (Exception e) {
             return null;
         }
@@ -1000,14 +992,18 @@ public final class SongPicker {
             Object brain = getBrain.invoke(mob);
             if (brain == null) return null;
 
-            Class<?> memoryTypeClass = Class.forName("net.minecraft.entity.ai.memory.MemoryModuleType");
+            Class<?> memoryTypeClass = Class.forName("net.minecraft.entity.ai.brain.MemoryModuleType");
             Object attackTarget = memoryTypeClass.getField("ATTACK_TARGET").get(null);
 
-            Method getMemory = brain.getClass().getMethod("getMemory", memoryTypeClass);
-            Object optional = getMemory.invoke(brain, attackTarget);
-            if (optional instanceof java.util.Optional<?> opt && opt.isPresent()) {
-                Object value = opt.get();
-                if (value instanceof net.minecraft.entity.LivingEntity living) return living;
+            for (Method m : brain.getClass().getMethods()) {
+                if (!m.getName().startsWith("get") || m.getParameterCount() != 1) continue;
+                if (!m.getParameterTypes()[0].getName().contains("MemoryModuleType")) continue;
+                if (!java.util.Optional.class.isAssignableFrom(m.getReturnType())) continue;
+                Object optional = m.invoke(brain, attackTarget);
+                if (optional instanceof java.util.Optional<?> opt && opt.isPresent()
+                        && opt.get() instanceof net.minecraft.entity.LivingEntity living) {
+                    return living;
+                }
             }
         } catch (Throwable ignored) {
             // older versions have no brain system

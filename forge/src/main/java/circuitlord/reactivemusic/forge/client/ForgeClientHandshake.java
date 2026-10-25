@@ -53,8 +53,13 @@ public class ForgeClientHandshake {
                     ForgeClientHandshake::decodeResponse,
                     ForgeClientHandshake::handleResponse);
 
-            manager.setRequestSender(clientVersion ->
-                    handshakeChannel.sendToServer(new HandshakePackets.HandshakeRequest(clientVersion)));
+            manager.setRequestSender(clientVersion -> {
+                net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
+                if (mc.getNetworkHandler() == null) return;
+                // не шлём, если на сервере нет канала (мод отсутствует)
+                if (!handshakeChannel.isRemotePresent(mc.getNetworkHandler().getConnection())) return;
+                handshakeChannel.sendToServer(new HandshakePackets.HandshakeRequest(clientVersion));
+            });
 
             // --- Канал целей мобов ---
             targetsChannel = NetworkRegistry.ChannelBuilder
@@ -133,7 +138,7 @@ public class ForgeClientHandshake {
 
     private static void handleMobTarget(ServerDataPackets.MobTargetPacket msg,
                                         Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> SongPicker.onMobTargetPacket(msg.mobUuid, msg.targetUuid));
+        ctx.get().enqueueWork(() -> SongPicker.onMobTargetPacket(msg.mobUuid, msg.status));
         ctx.get().setPacketHandled(true);
     }
 
