@@ -20,15 +20,22 @@ public class ClientHandshakeManager {
     /** Время отправки последнего HandshakeRequest (для повторной отправки). */
     private long lastRequestTime = 0L;
 
+    /** Версия клиента, сохранённая при входе — нужна для повторных запросов. */
+    private String clientVersion = null;
+
     /** Серверная версия, если известна. */
     private String serverVersion = null;
 
     /** Отправитель HandshakeRequest, устанавливается веткой лоадера. */
     private Consumer<String> requestSender = null;
 
+    /** Через сколько мс после первого запроса прекращаем повторять (защита от бесконечного спама). */
+    private static final long RETRY_GIVEUP_MS = 60_000L;
+
     public void onPlayerJoin(String clientVersion) {
         serverAcknowledged = false;
         serverVersion = null;
+        this.clientVersion = clientVersion;
         lastRequestTime = 0L;
         sendRequest(clientVersion);
     }
@@ -41,6 +48,7 @@ public class ClientHandshakeManager {
     public void onPlayerLeave() {
         serverAcknowledged = false;
         serverVersion = null;
+        clientVersion = null;
         lastRequestTime = 0L;
     }
 
@@ -48,6 +56,7 @@ public class ClientHandshakeManager {
     public void clear() {
         serverAcknowledged = false;
         serverVersion = null;
+        clientVersion = null;
         lastRequestTime = 0L;
     }
 
@@ -62,6 +71,21 @@ public class ClientHandshakeManager {
             requestSender.accept(clientVersion);
         } else {
             throw new UnsupportedOperationException("Loader-specific network send required");
+        }
+    }
+
+    /**
+     * Вызывать каждый клиентский тик. Повторяет HandshakeRequest, пока сервер не ответил.
+     * Так пакет не «потеряется»: если первый запрос/ответ не дошёл, клиент дошлёт его снова.
+     */
+    public void tickRetry() {
+        if (serverAcknowledged) return;
+        if (requestSender == null || clientVersion == null) return;
+        if (lastRequestTime == 0L) return; // ещё не входили на сервер
+        long now = System.currentTimeMillis();
+        if (now - lastRequestTime > RETRY_GIVEUP_MS) return; // сдались — вероятно, сервер без мода
+        if (now - lastRequestTime >= HandshakeConstants.HANDSHAKE_RETRY_MS) {
+            sendRequest(clientVersion);
         }
     }
 

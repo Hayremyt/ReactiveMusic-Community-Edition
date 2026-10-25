@@ -547,6 +547,9 @@ public final class SongPicker {
         if (player == null || world == null)
             return;
 
+        // повторяем рукопожатие, пока сервер не ответил — чтобы запрос/ответ не потерялись
+        clientHandshakeManager.tickRetry();
+
         // client-side damage detection: if health dropped this tick, we took damage
         // (works on dedicated servers where PlayerEntity.damage() mixin may not fire)
         float currentHealth = player.getHealth();
