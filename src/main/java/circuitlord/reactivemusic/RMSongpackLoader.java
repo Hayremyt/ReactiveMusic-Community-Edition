@@ -328,7 +328,7 @@ public class RMSongpackLoader {
                 continue;
             }
 
-            if (runtimeEntry.conditions.isEmpty()) continue;
+            if (runtimeEntry.conditionGroups.isEmpty()) continue;
 
             // entries with no playable songs would win priority and play silence forever
             if (runtimeEntry.songs.isEmpty()) {

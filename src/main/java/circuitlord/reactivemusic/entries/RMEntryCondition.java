@@ -13,8 +13,9 @@ import java.util.List;
 
 public class RMEntryCondition {
 
-    // the way conditions work just means that each condition requires there to be at least one true in each list (or empty list) for the whole condition to be valid
-    // This is how we handle ORs
+    // One "||" alternative of an event string (see RMEntryConditionGroup). It holds when at
+    // least one positive term matches (empty list = no constraint) AND no negated term matches.
+    // Grouping is what makes "!X" inside a "||" behave as "OR NOT" rather than "AND NOT".
 
     public List<SongpackEventType> songpackEvents = new ArrayList<>();
     public List<String> biomeTypes = new ArrayList<>();

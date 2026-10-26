@@ -153,6 +153,21 @@ You can also negate any event with `!`:
       - "Freedom"
 ```
 
+Negation combines with `||` the same way: `||` is still **OR**. So `"!RAIN || UNDERWATER"` means *(not raining) OR (underwater)*:
+
+```
+  - events: [ "!RAIN || UNDERWATER" ]
+    songs:
+      - "Freedom"
+```
+
+Note the difference — two separate strings are ANDed, one string with `||` is ORed:
+
+```
+  - events: [ "!BIOME=ocean", "!STRUCT=village" ]   # not an ocean AND not a village
+  - events: [ "!BIOME=ocean || !STRUCT=village" ]   # not an ocean OR not a village
+```
+
 ## Conditions cheat-sheet
 
 Two kinds of things go into `events`, nothing else:
