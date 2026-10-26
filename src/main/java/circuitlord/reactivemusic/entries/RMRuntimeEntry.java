@@ -19,7 +19,8 @@ import java.util.List;
 public class RMRuntimeEntry {
 
 
-    public List<RMEntryCondition> conditions = new ArrayList<>();
+    /** ANDed groups; each group is the OR of its {@code ||} alternatives. */
+    public List<RMEntryConditionGroup> conditionGroups = new ArrayList<>();
 
     public String songpack;
 
@@ -73,8 +74,6 @@ public class RMRuntimeEntry {
 
         for (String event : songpackEntry.events) {
 
-            RMEntryCondition condition = new RMEntryCondition();
-
             String cleanedEvent = event.replaceAll("\\s", "");
             cleanedEvent = cleanedEvent.toLowerCase();
 
@@ -86,10 +85,15 @@ public class RMRuntimeEntry {
             // Split by "||"
             String[] eventSections = cleanedEvent.split("\\|\\|");
 
-            boolean eventHasData = false;
+            // one event string is a group of OR alternatives; groups themselves are ANDed
+            RMEntryConditionGroup group = new RMEntryConditionGroup();
 
             // Parse each event section (may only be one)
             for (String eventSection : eventSections) {
+
+                // each "||" section becomes one OR alternative (one condition)
+                RMEntryCondition condition = new RMEntryCondition();
+                boolean sectionHasData = false;
 
                 // negated section ("!NIGHT", "!BIOME=ocean"), none of these may match
                 boolean negated = false;
@@ -132,7 +136,7 @@ public class RMRuntimeEntry {
                         if (negated) condition.negBlocks.add(blockCond);
                         else condition.blocks.add(blockCond);
 
-                        eventHasData = true;
+                        sectionHasData = true;
                     }
                     else {
                         Entry.errorString += "Invalid syntax: " + eventSection + "!\n\n";
@@ -148,7 +152,7 @@ public class RMRuntimeEntry {
 
                     if (negated) condition.negBiomeTypes.add(biomeName);
                     else condition.biomeTypes.add(biomeName);
-                    eventHasData = true;
+                    sectionHasData = true;
                 }
 
                 // Biome-tags
@@ -165,7 +169,7 @@ public class RMRuntimeEntry {
                         if (negated) condition.negBiomeTags.add(biomeTag);
                         else condition.biomeTags.add(biomeTag);
                         SongPicker.registerBiomeTag(biomeTag);
-                        eventHasData = true;
+                        sectionHasData = true;
                     } else {
                         Entry.errorString += "Biome tag '" + rawTagString + "' is not available on this platform!\n\n";
                     }
@@ -180,7 +184,7 @@ public class RMRuntimeEntry {
 
                     if (negated) condition.negDimTypes.add(dimName);
                     else condition.dimTypes.add(dimName);
-                    eventHasData = true;
+                    sectionHasData = true;
                 }
 
                 // structures
@@ -191,7 +195,7 @@ public class RMRuntimeEntry {
 
                     if (negated) condition.negStructureTypes.add(structName);
                     else condition.structureTypes.add(structName);
-                    eventHasData = true;
+                    sectionHasData = true;
                 }
 
                 // structures (short alias)
@@ -202,7 +206,7 @@ public class RMRuntimeEntry {
 
                     if (negated) condition.negStructureTypes.add(structName);
                     else condition.structureTypes.add(structName);
-                    eventHasData = true;
+                    sectionHasData = true;
                 }
 
                 // entities, named parameters only: ENTITY=zombie,r=32,c=3,target=me
@@ -283,7 +287,7 @@ public class RMRuntimeEntry {
                         if (negated) condition.negEntityTypes.add(entityCond);
                         else condition.entityTypes.add(entityCond);
 
-                        eventHasData = true;
+                        sectionHasData = true;
                     }
                     else {
                         Entry.errorString += "Invalid syntax: " + eventSection + "!\n\n";
@@ -343,7 +347,7 @@ public class RMRuntimeEntry {
 
                         if (negated) condition.negBossTypes.add(bossCond);
                         else condition.bossTypes.add(bossCond);
-                        eventHasData = true;
+                        sectionHasData = true;
                     }
                     else {
                         Entry.errorString += "Invalid syntax: " + eventSection + "!\n\n";
@@ -361,22 +365,26 @@ public class RMRuntimeEntry {
                         if (eventType != SongpackEventType.NONE) {
                             if (negated) condition.negSongpackEvents.add(eventType);
                             else condition.songpackEvents.add(eventType);
-                            eventHasData = true;
-                            continue;
+                            sectionHasData = true;
                         }
                     } catch (Exception e) {
                         Entry.errorString += "Could not find event with name " + eventSection + "!\n\n";
                         //e.printStackTrace();
                     }
                 }
+
+                // this section parsed into a term — keep it as one OR alternative
+                if (sectionHasData) {
+                    group.alternatives.add(condition);
+                }
             }
 
-            // --- If we didn't find any valid conditions, skip this ---
-            if (!eventHasData) {
+            // --- If no section of this event parsed, skip it ---
+            if (group.alternatives.isEmpty()) {
                 continue;
             }
 
-            Entry.conditions.add(condition);
+            Entry.conditionGroups.add(group);
 
         }
 

@@ -4,6 +4,7 @@ package circuitlord.reactivemusic;
 import circuitlord.reactivemusic.config.ModConfig;
 import circuitlord.reactivemusic.entries.RMEntryBlockCondition;
 import circuitlord.reactivemusic.entries.RMEntryBossCondition;
+import circuitlord.reactivemusic.entries.RMEntryCondition;
 import circuitlord.reactivemusic.entries.RMEntryEntityCondition;
 import circuitlord.reactivemusic.entries.RMEntityTargetMode;
 import circuitlord.reactivemusic.entries.RMRuntimeEntry;
@@ -697,44 +698,61 @@ public final class SongPicker {
     
     public static boolean isEntryValid(RMRuntimeEntry entry) {
 
-        for (var condition : entry.conditions) {
+        for (var group : entry.conditionGroups) {
 
-            // each condition functions as an AND, every condition in the entry must hold
-
-            boolean hasPositives = !condition.songpackEvents.isEmpty() || !condition.biomeTypes.isEmpty()
-                    || !condition.dimTypes.isEmpty() || !condition.biomeTags.isEmpty()
-                    || !condition.blocks.isEmpty() || !condition.structureTypes.isEmpty()
-                    || !condition.entityTypes.isEmpty() || !condition.bossTypes.isEmpty();
-
-            // positives function as an OR, at least one of them must hold (or none specified)
-            boolean positivesHold = !hasPositives
-                    || anyEventMatches(condition.songpackEvents)
-                    || anyBiomeMatches(condition.biomeTypes)
-                    || anyBiomeTagMatches(condition.biomeTags)
-                    || anyDimMatches(condition.dimTypes)
-                    || anyBlockMatches(condition.blocks)
-                    || anyStructureMatches(condition.structureTypes)
-                    || anyEntityMatches(condition.entityTypes)
-                    || anyBossMatches(condition.bossTypes);
-
-            if (!positivesHold) return false;
-
-            // negated ("!EVENT") entries, none of them may match
-            if (anyEventMatches(condition.negSongpackEvents)
-                    || anyBiomeMatches(condition.negBiomeTypes)
-                    || anyBiomeTagMatches(condition.negBiomeTags)
-                    || anyDimMatches(condition.negDimTypes)
-                    || anyBlockMatches(condition.negBlocks)
-                    || anyStructureMatches(condition.negStructureTypes)
-                    || anyEntityMatches(condition.negEntityTypes)
-                    || anyBossMatches(condition.negBossTypes)) {
-                return false;
+            // every "events" string (group) must hold (AND) ...
+            // ... and a group holds when ANY of its "||" alternatives holds (OR)
+            boolean groupHolds = false;
+            for (var condition : group.alternatives) {
+                if (conditionMatches(condition)) {
+                    groupHolds = true;
+                    break;
+                }
             }
+
+            if (!groupHolds) return false;
 
         }
 
         // we passed without failing so it must be true
         return true;
+
+    }
+
+    /**
+     * One {@code ||} alternative: it holds when its positives OR together and none of its
+     * negated terms match. Keeping each alternative separate is what makes {@code !} inside
+     * a {@code ||} behave as "OR NOT" instead of "AND NOT".
+     */
+    static boolean conditionMatches(RMEntryCondition condition) {
+
+        boolean hasPositives = !condition.songpackEvents.isEmpty() || !condition.biomeTypes.isEmpty()
+                || !condition.dimTypes.isEmpty() || !condition.biomeTags.isEmpty()
+                || !condition.blocks.isEmpty() || !condition.structureTypes.isEmpty()
+                || !condition.entityTypes.isEmpty() || !condition.bossTypes.isEmpty();
+
+        // positives function as an OR, at least one of them must hold (or none specified)
+        boolean positivesHold = !hasPositives
+                || anyEventMatches(condition.songpackEvents)
+                || anyBiomeMatches(condition.biomeTypes)
+                || anyBiomeTagMatches(condition.biomeTags)
+                || anyDimMatches(condition.dimTypes)
+                || anyBlockMatches(condition.blocks)
+                || anyStructureMatches(condition.structureTypes)
+                || anyEntityMatches(condition.entityTypes)
+                || anyBossMatches(condition.bossTypes);
+
+        if (!positivesHold) return false;
+
+        // negated ("!EVENT") entries, none of them may match
+        return !(anyEventMatches(condition.negSongpackEvents)
+                || anyBiomeMatches(condition.negBiomeTypes)
+                || anyBiomeTagMatches(condition.negBiomeTags)
+                || anyDimMatches(condition.negDimTypes)
+                || anyBlockMatches(condition.negBlocks)
+                || anyStructureMatches(condition.negStructureTypes)
+                || anyEntityMatches(condition.negEntityTypes)
+                || anyBossMatches(condition.negBossTypes));
 
     }
 
