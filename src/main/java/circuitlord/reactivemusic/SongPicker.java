@@ -17,6 +17,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.CreditsScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
 
 import net.minecraft.entity.mob.HostileEntity;
@@ -27,6 +28,7 @@ import net.minecraft.entity.passive.PigEntity;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.entity.vehicle.MinecartEntity;
+import net.minecraft.item.Items;
 
 //? if >=1.20 {
 /*import net.minecraft.registry.Registries;
@@ -257,6 +259,14 @@ public final class SongPicker {
 
         songpackEventMap.put(SongpackEventType.DYING, player.getHealth() / player.getMaxHealth() < 0.35);
         songpackEventMap.put(SongpackEventType.FISHING, player.fishHook != null);
+
+        // elytra flight — the gliding flag is synced to the client; the chest slot check
+        // makes sure it is a real elytra and not a riptide spin
+        //? if >=1.21.11 {
+        /*songpackEventMap.put(SongpackEventType.ELYTRA, player.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA) && player.isGliding());
+        *///?} else {
+        songpackEventMap.put(SongpackEventType.ELYTRA, player.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA) && player.isFallFlying());
+        //?}
 
         songpackEventMap.put(SongpackEventType.MINECART, riding instanceof MinecartEntity);
         songpackEventMap.put(SongpackEventType.BOAT, riding instanceof BoatEntity);

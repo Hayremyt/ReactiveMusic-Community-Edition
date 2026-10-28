@@ -239,6 +239,7 @@ All available event types. Remember: within one entry, different events mean AND
 ### Actions
 - `FISHING` (fishing rod cast out)
 - `DYING` (health below 35% of max)
+- `ELYTRA` (actually gliding on an elytra — not just wearing one in the chest slot; works on any server, vanilla syncs this state)
 
 ### Location
 - `VILLAGE` (1 or more villagers within 30 blocks sideways / 15 up-down)
