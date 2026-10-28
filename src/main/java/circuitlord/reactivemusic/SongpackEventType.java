@@ -38,6 +38,7 @@ public enum SongpackEventType {
     //Actions
     FISHING,
     DYING,
+    ELYTRA,
 
 
     // TODO: remove
