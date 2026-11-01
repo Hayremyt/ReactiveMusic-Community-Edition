@@ -34,6 +34,23 @@ Reactive Music trades Minecraft's default music for something dynamic, reactive,
 
 Build all artifacts with `./gradlew chiseledBuild` (see `docs/MAKING_SONGPACKS.md` for songpack authoring).
 
+## Roadmap
+
+Ideas and plans — nothing here is committed to a release yet.
+
+### Planned
+- **Optional server mod (`ReactiveMusic-Server`)** — exact per-player mob targets and structure data
+  on dedicated servers. The client half exists and degrades gracefully without it; it still needs
+  live-server testing before it reaches the default branch.
+
+### Ideas (long-term / in the drawer)
+- **Public extension API for third-party conditions.** Other mods would register their own songpack
+  conditions under a namespace (`modid:key`), and ReactiveMusic would only compare the value they
+  provide — e.g. `mymod:rage,above=80`, `mymod:mood=combat`, `mymod:in_arena`. A provider returns a
+  boolean, number or text (computed client-side) and the mod handles `below=` / `above=` / `=` plus
+  `!` negation. Parked until a real mod needs it: a public API is a long-term compatibility promise.
+  Server-side data (like `STRUCT=`) stays the providing mod's own sync — no shared data channel.
+
 ## License
 
 GPLv3, same as upstream. All credit for the original mod, music and idea goes to CircuitLord.
