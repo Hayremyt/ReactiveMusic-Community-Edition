@@ -39,9 +39,13 @@ Build all artifacts with `./gradlew chiseledBuild` (see `docs/MAKING_SONGPACKS.m
 Ideas and plans — nothing here is committed to a release yet.
 
 ### Planned
-- **Optional server mod (`ReactiveMusic-Server`)** — exact per-player mob targets and structure data
-  on dedicated servers. The client half exists and degrades gracefully without it; it still needs
-  live-server testing before it reaches the default branch.
+- **Server-mod integration in the default branch.** The optional
+  [`ReactiveMusic-Server`](https://github.com/Hayremyt/ReactiveMusic-Server) mod already exists and
+  builds on its own, and the client half lives in the
+  [`server-mod-integration`](https://github.com/Hayremyt/ReactiveMusic-Community-Edition/tree/server-mod-integration)
+  branch (exact per-player mob targets and structure data on dedicated servers). When the server mod
+  is absent the client falls back to its heuristic, so it degrades gracefully. It has **not been
+  tested in-game on live servers yet**, which is why it is not merged into the default branch.
 
 ### Ideas (long-term / in the drawer)
 - **Public extension API for third-party conditions.** Other mods would register their own songpack
