@@ -148,7 +148,13 @@ public class ModConfig {
                 }
             }));
 
-            addDrawableChild(button(centerX - 80, 120, 160, BUTTON_HEIGHT, Text.literal("Open Songpack Folder"), b -> openSongpackFolder()));
+            addDrawableChild(button(centerX - 155, 120, 145, BUTTON_HEIGHT, Text.literal("Open Songpack Folder"), b -> openSongpackFolder()));
+
+            addDrawableChild(button(centerX + 10, 120, 145, BUTTON_HEIGHT, toastText(config.showNowPlayingToast), b -> {
+                config.showNowPlayingToast = !config.showNowPlayingToast;
+                saveConfig();
+                b.setMessage(toastText(config.showNowPlayingToast));
+            }));
 
             int perPage = rowsPerPage();
             int pages = totalPages(perPage);
@@ -673,6 +679,10 @@ public class ModConfig {
 
         private static Text toggleText(boolean value) {
             return Text.literal(value ? "On" : "Off");
+        }
+
+        private static Text toastText(boolean value) {
+            return Text.literal("Now Playing: " + (value ? "On" : "Off"));
         }
 
         private static <T extends Enum<T>> T next(T current, T[] values) {

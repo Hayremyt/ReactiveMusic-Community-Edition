@@ -57,6 +57,8 @@ public class ReactiveMusic {
 	static int waitForStopTicks = 0;
 	static int waitForNewSongTicks = NO_SONG_DELAY_PENDING;
 	static int fadeOutTicks = 0;
+	/** Fade-out length in ticks for the switch currently in progress (per-entry custom fade or the default). */
+	static int activeFadeDuration = FADE_DURATION;
 	//static int fadeInTicks = 0;
 	static int silenceTicks = 0;
 
@@ -271,7 +273,7 @@ public class ReactiveMusic {
 				fadeOutTicks--;
 
 				// Copy the behavior from below where it fades out
-				thread.setGainPercentage(1f - (fadeOutTicks / (float)FADE_DURATION));
+				thread.setGainPercentage(1f - (fadeOutTicks / (float)Math.max(1, activeFadeDuration)));
 			}
 
 
@@ -279,6 +281,11 @@ public class ReactiveMusic {
 			// ---- FADE OUT ----
 
 			if (wantsToSwitch && thread.isPlaying()) {
+
+				// pick the fade length once, when this fade-out starts (per-entry custom fade)
+				if (fadeOutTicks == 0) {
+					activeFadeDuration = fadeDurationFor(newEntry);
+				}
 
 				waitForStopTicks++;
 
@@ -345,6 +352,9 @@ public class ReactiveMusic {
 		// this can happen if no entry is valid or the dimension is blacklisted
 		else {
 
+			if (fadeOutTicks == 0) {
+				activeFadeDuration = FADE_DURATION;
+			}
 			tickFadeOut();
 
 		}
@@ -487,9 +497,15 @@ public class ReactiveMusic {
 		if (!thread.isPlaying())
 			return;
 
-		if (fadeOutTicks < FADE_DURATION) {
+		// a custom fade of 0 (or less) is a hard cut with no fade at all
+		if (activeFadeDuration <= 0) {
+			resetPlayer();
+			return;
+		}
+
+		if (fadeOutTicks < activeFadeDuration) {
 			fadeOutTicks++;
-			thread.setGainPercentage(1f - (fadeOutTicks / (float)FADE_DURATION));
+			thread.setGainPercentage(1f - (fadeOutTicks / (float)activeFadeDuration));
 		}
 		else {
 			resetPlayer();
@@ -589,6 +605,17 @@ public class ReactiveMusic {
 		return currentSongpack;
 	}
 
+	/** Fade-out length (ticks) for switching into this entry: the pack's custom fade if the entry opted in, else the default. */
+	static int fadeDurationFor(RMRuntimeEntry entry) {
+		if (entry != null && entry.customFade) {
+			SongpackZip pack = packForEntry(entry);
+			if (pack != null && pack.config != null) {
+				return Math.max(0, pack.config.customFadeTicks);
+			}
+		}
+		return FADE_DURATION;
+	}
+
 	public static void deactivateSongpack(SongpackZip songpackZip) {
 
 		// remove all entries that match that name
@@ -682,6 +709,7 @@ public class ReactiveMusic {
 		}
 
 		fadeOutTicks = 0;
+		activeFadeDuration = FADE_DURATION;
 		queuedToStopMusic = false;
 		currentEntry = null;
 		currentSong = null;
