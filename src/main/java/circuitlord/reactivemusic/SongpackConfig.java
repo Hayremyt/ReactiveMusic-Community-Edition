@@ -18,6 +18,9 @@ public class SongpackConfig {
 
     public MusicSwitchSpeed musicSwitchSpeed = MusicSwitchSpeed.NORMAL;
 
+    // fade-out length in ticks (20 per second) used by entries with `customFade: true`; 0 = instant cut
+    public int customFadeTicks = 0;
+
     public SongpackEntry[] entries;
 
 

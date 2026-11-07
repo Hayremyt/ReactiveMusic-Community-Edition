@@ -21,6 +21,9 @@ public class SongpackEntry {
     // skip the musicDelayLength silence before starting this entry (good for BOSS/CREDITS with LONG delay)
     public boolean ignoreMusicDelay = false;
 
+    // use the songpack's customFadeTicks as the fade-out length when switching into this entry
+    public boolean customFade = false;
+
     // if valid, win over every entry without this flag regardless of file order (good for BOSS)
     public boolean alwaysOverride = false;
 

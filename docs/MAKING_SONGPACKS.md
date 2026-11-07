@@ -46,6 +46,7 @@ musicDelayLength: NORMAL
 - `(String) name` The unique name/identifier for your songpack.
 -  `musicSwitchSpeed` (INSTANT, SHORT, NORMAL, LONG) Defines the default for how fast music will stop when it's event becomes invalid
 -  `musicDelayLength` (NONE, SHORT, NORMAL, LONG) Defines the default for how much silence there should be before a new song starts playing again
+-  `customFadeTicks` (int, default 0) Fade-out length in ticks (20 per second) used by entries with `customFade: true`. `0` = instant cut, `20` = 1 second.
 
 <br><br>
 
@@ -109,6 +110,9 @@ Probability (0.0–1.0) for the force actions above. Rolled once per change, all
 
 #### `ignoreMusicDelay` (Boolean, default false)
 Skip the `musicDelayLength` silence before starting this entry. Good for BOSS/CREDITS entries when you use a LONG delay everywhere else.
+
+#### `customFade` (Boolean, default false)
+When switching **into** this entry, fade the previous song out over the songpack's `customFadeTicks` instead of the default fade. With `customFadeTicks: 0` the switch is an instant cut. Combine with `forceStopMusicOnChanged` + `forceStartMusicOnValid` (+ `alwaysOverride`) for an immediate switch.
 
 #### `alwaysOverride` (Boolean, default false)
 If this entry is valid it wins over every entry without the flag, no matter where it sits in the file. Good for BOSS (boss interrupts home music). Combine with `forceStopMusicOnChanged` for an instant switch.
